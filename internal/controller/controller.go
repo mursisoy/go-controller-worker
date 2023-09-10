@@ -2,7 +2,7 @@ package controller
 
 import (
 	"encoding/gob"
-	"fmt"
+	"log"
 	"mursisoy/wordcount/internal/common"
 	"net"
 )
@@ -41,7 +41,7 @@ func NewController() *Controller {
 func (c *Controller) Start() {
 	listener, err := net.Listen("tcp", "localhost:8080")
 	if err != nil {
-		fmt.Printf("Controller failed to start listener: %v\n", err)
+		log.Fatalf("Controller failed to start listener: %v\n", err)
 		return
 	}
 	defer listener.Close()
@@ -50,12 +50,12 @@ func (c *Controller) Start() {
 	go func() {
 		shutdown := <-c.shutdown
 		_ = shutdown
-		fmt.Printf("Shutdown received. Cleaning up....")
+		log.Printf("Shutdown received. Cleaning up....")
 		listener.Close()
 	}()
 
 	// Main loop to handle connections
-	fmt.Printf("Controller listener started: %v\n", listener.Addr().String())
+	log.Printf("Controller listener started: %v\n", listener.Addr().String())
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -63,7 +63,7 @@ func (c *Controller) Start() {
 			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
 				return // Listener was closed
 			}
-			fmt.Printf("Error accepting connection: %v\n", err)
+			log.Fatalf("Error accepting connection: %v\n", err)
 			return
 		}
 
@@ -73,7 +73,7 @@ func (c *Controller) Start() {
 
 // Shutdown gracefully shuts down the controller and worker nodes.
 func (c *Controller) Shutdown() {
-	fmt.Printf("Received Shutdown call")
+	log.Printf("Received Shutdown call")
 	close(c.shutdown) // Close the controller's shutdown channel
 }
 
@@ -83,12 +83,12 @@ func (c *Controller) HandleClient(conn net.Conn) {
 	var signupRequest common.SignupRequest
 	decoder := gob.NewDecoder(conn)
 	if err := decoder.Decode(&signupRequest); err != nil {
-		fmt.Printf("Error decoding message: %v\n", err)
+		log.Fatalf("Error decoding message: %v\n", err)
 	}
-	fmt.Printf("New signup request from %v\n", signupRequest.Address)
+	log.Printf("New signup request from %v\n", signupRequest.Address)
 	encoder := gob.NewEncoder(conn)
 	response := common.SignupResponse{Response: common.Response{Success: true}}
 	if err := encoder.Encode(response); err != nil {
-		fmt.Printf("Signup error to server: %v", err)
+		log.Fatalf("Signup error to server: %v", err)
 	}
 }

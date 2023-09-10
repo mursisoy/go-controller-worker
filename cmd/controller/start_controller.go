@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"mursisoy/wordcount/internal/controller"
 	"os"
 	"os/signal"
@@ -19,10 +19,10 @@ func main() {
 	// Goroutine to catch shutdown signals
 	go func() {
 		sig := <-sigCh
-		fmt.Printf("Received signal: %v\n", sig)
+		log.Printf("Received signal: %v\n", sig)
 		controller.Shutdown()
 	}()
 
 	controller.Start()
-	fmt.Printf("Exited\n")
+	log.Printf("Exited\n")
 }

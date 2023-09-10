@@ -2,7 +2,7 @@ package worker
 
 import (
 	"encoding/gob"
-	"fmt"
+	"log"
 	"mursisoy/wordcount/internal/common"
 	"net"
 )
@@ -36,7 +36,7 @@ func NewWorker() *Worker {
 func (w *Worker) Start() {
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
-		fmt.Printf("Worker failed to start listener: %v\n", err)
+		log.Fatalf("Worker failed to start listener: %v\n", err)
 		return
 	}
 	defer listener.Close()
@@ -45,15 +45,15 @@ func (w *Worker) Start() {
 	go func() {
 		shutdown := <-w.shutdown
 		_ = shutdown
-		fmt.Printf("Shutdown received. Cleaning up....\n")
+		log.Printf("Shutdown received. Cleaning up....\n")
 		listener.Close()
 	}()
 
 	// Main loop to handle connections
-	fmt.Printf("Worker listener started: %v\n", listener.Addr().String())
+	log.Printf("Worker listener started: %v\n", listener.Addr().String())
 
 	if ok := w.signup(common.SignupRequest{Address: listener.Addr().String()}); !ok {
-		fmt.Printf("Signup failed. Exiting.\n")
+		log.Fatalf("Signup failed. Exiting.\n")
 		return
 	}
 
@@ -64,7 +64,7 @@ func (w *Worker) Start() {
 			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
 				return // Listener was closed
 			}
-			fmt.Printf("Error accepting connection: %v\n", err)
+			log.Fatalf("Error accepting connection: %v\n", err)
 			return
 		}
 
@@ -76,34 +76,34 @@ func (w *Worker) signup(message common.SignupRequest) bool {
 	// Connect to the server
 	conn, err := net.Dial("tcp", ":8080")
 	if err != nil {
-		fmt.Printf("Error connecting to server: %v\n", err)
+		log.Printf("Error connecting to server: %v\n", err)
 		return false
 	}
 	defer conn.Close()
 
 	encoder := gob.NewEncoder(conn)
 	if err = encoder.Encode(message); err != nil {
-		fmt.Printf("Signup error to server: %v\n", err)
+		log.Printf("Signup error to server: %v\n", err)
 		return false
 	}
 
 	var signupResponse common.SignupResponse
 	decoder := gob.NewDecoder(conn)
 	if err := decoder.Decode(&signupResponse); err != nil {
-		fmt.Printf("Error decoding message: %v\n", err)
+		log.Printf("Error decoding message: %v\n", err)
 		return false
 	}
 	if signupResponse.Success {
 		return true
 	} else {
-		fmt.Printf("Signup error: %v\n", signupResponse.Message)
+		log.Printf("Signup error: %v\n", signupResponse.Message)
 		return false
 	}
 }
 
 // Shutdown gracefully shuts down the worker and worker nodes.
 func (w *Worker) Shutdown() {
-	fmt.Printf("Received Shutdown call")
+	log.Printf("Received Shutdown call")
 	close(w.shutdown) // Close the worker's shutdown channel
 }
 
