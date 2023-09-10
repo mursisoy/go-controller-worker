@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"encoding/gob"
 	"fmt"
+	"mursisoy/wordcount/internal/common"
 	"net"
 )
 
@@ -24,6 +26,10 @@ type Controller struct {
 // 	ip   string
 // 	port int
 // }
+
+func init() {
+	// gob.Register()
+}
 
 // NewController creates a new instance of the controller.
 func NewController() *Controller {
@@ -49,7 +55,7 @@ func (c *Controller) Start() {
 	}()
 
 	// Main loop to handle connections
-	fmt.Printf("Controller listener started\n")
+	fmt.Printf("Controller listener started: %v\n", listener.Addr().String())
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -74,9 +80,15 @@ func (c *Controller) Shutdown() {
 // HandleClient handles incoming client connections for the controller.
 func (c *Controller) HandleClient(conn net.Conn) {
 	defer conn.Close()
-
-	// for {
-	// 	// Implement your controller's server logic here
-	// 	// For example, handle commands received from workers
-	// }
+	var signupRequest common.SignupRequest
+	decoder := gob.NewDecoder(conn)
+	if err := decoder.Decode(&signupRequest); err != nil {
+		fmt.Printf("Error decoding message: %v\n", err)
+	}
+	fmt.Printf("New signup request from %v\n", signupRequest.Address)
+	encoder := gob.NewEncoder(conn)
+	response := common.SignupResponse{Response: common.Response{Success: true}}
+	if err := encoder.Encode(response); err != nil {
+		fmt.Printf("Signup error to server: %v", err)
+	}
 }
