@@ -41,7 +41,7 @@ func NewController() *Controller {
 func (c *Controller) Start() {
 	listener, err := net.Listen("tcp", "localhost:8080")
 	if err != nil {
-		log.Fatalf("Controller failed to start listener: %v\n", err)
+		log.Printf("Controller failed to start listener: %v\n", err)
 		return
 	}
 	defer listener.Close()
@@ -63,7 +63,7 @@ func (c *Controller) Start() {
 			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
 				return // Listener was closed
 			}
-			log.Fatalf("Error accepting connection: %v\n", err)
+			log.Printf("Error accepting connection: %v\n", err)
 			return
 		}
 
@@ -83,12 +83,12 @@ func (c *Controller) HandleClient(conn net.Conn) {
 	var signupRequest common.SignupRequest
 	decoder := gob.NewDecoder(conn)
 	if err := decoder.Decode(&signupRequest); err != nil {
-		log.Fatalf("Error decoding message: %v\n", err)
+		log.Printf("Error decoding message: %v\n", err)
 	}
 	log.Printf("New signup request from %v\n", signupRequest.Address)
 	encoder := gob.NewEncoder(conn)
 	response := common.SignupResponse{Response: common.Response{Success: true}}
 	if err := encoder.Encode(response); err != nil {
-		log.Fatalf("Signup error to server: %v", err)
+		log.Printf("Signup error to server: %v", err)
 	}
 }

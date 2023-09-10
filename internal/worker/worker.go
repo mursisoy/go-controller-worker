@@ -36,7 +36,7 @@ func NewWorker() *Worker {
 func (w *Worker) Start() {
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
-		log.Fatalf("Worker failed to start listener: %v\n", err)
+		log.Printf("Worker failed to start listener: %v\n", err)
 		return
 	}
 	defer listener.Close()
@@ -53,7 +53,7 @@ func (w *Worker) Start() {
 	log.Printf("Worker listener started: %v\n", listener.Addr().String())
 
 	if ok := w.signup(common.SignupRequest{Address: listener.Addr().String()}); !ok {
-		log.Fatalf("Signup failed. Exiting.\n")
+		log.Printf("Signup failed. Exiting.\n")
 		return
 	}
 
@@ -64,7 +64,7 @@ func (w *Worker) Start() {
 			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
 				return // Listener was closed
 			}
-			log.Fatalf("Error accepting connection: %v\n", err)
+			log.Printf("Error accepting connection: %v\n", err)
 			return
 		}
 
@@ -86,7 +86,6 @@ func (w *Worker) signup(message common.SignupRequest) bool {
 		log.Printf("Signup error to server: %v\n", err)
 		return false
 	}
-
 	var signupResponse common.SignupResponse
 	decoder := gob.NewDecoder(conn)
 	if err := decoder.Decode(&signupResponse); err != nil {
