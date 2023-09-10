@@ -1,25 +1,50 @@
 package common
 
-type Signup struct {
+type Response struct {
+	Success bool
+	Message string
+}
+
+type SignupRequest struct {
 	Address string
 }
 
-type MonitorWorker struct {
+type SignupResponse struct {
+	Response
+}
+
+type MonitorWorkerRequest struct {
 	Address string
 }
 
-type JobSubmit struct {
+type MonitorWorkerResponse struct {
+	Response
+}
+
+type JobSubmitRequest struct {
 	JobType string
 	JobId   string
 }
 
-type JobDone struct {
+type JobSubmitResponse struct {
+	Response
+}
+
+type JobDoneRequest struct {
 	JobType string
 	JobId   int
 }
 
-type WorkerFailure struct {
+type JobDoneResponse struct {
+	Response
+}
+
+type WorkerFailureRequest struct {
 	Address string
+}
+
+type WokerFailureRespnse struct {
+	Response
 }
 
 type Ping struct{}
