@@ -28,7 +28,8 @@ type Controller struct {
 // }
 
 func init() {
-	// gob.Register()
+	gob.Register(common.SignupRequest{})
+	gob.Register(common.SignupResponse{})
 }
 
 // NewController creates a new instance of the controller.
@@ -80,15 +81,29 @@ func (c *Controller) Shutdown() {
 // HandleClient handles incoming client connections for the controller.
 func (c *Controller) HandleClient(conn net.Conn) {
 	defer conn.Close()
-	var signupRequest common.SignupRequest
+	var data interface{}
 	decoder := gob.NewDecoder(conn)
-	if err := decoder.Decode(&signupRequest); err != nil {
+	if err := decoder.Decode(&data); err != nil {
 		log.Printf("Error decoding message: %v\n", err)
+		return
 	}
+
+	switch mt := data.(type) {
+	case common.SignupRequest:
+		c.handleSignupRequest(data.(common.SignupRequest), conn)
+	default:
+		log.Printf("%v message type received but not handled", mt)
+	}
+
+}
+
+func (c *Controller) handleSignupRequest(signupRequest common.SignupRequest, conn net.Conn) {
 	log.Printf("New signup request from %v\n", signupRequest.Address)
+	var signupResponse = common.SignupResponse{Response: common.Response{Success: true}}
+
 	encoder := gob.NewEncoder(conn)
-	response := common.SignupResponse{Response: common.Response{Success: true}}
-	if err := encoder.Encode(response); err != nil {
+	var response interface{} = signupResponse
+	if err := encoder.Encode(&response); err != nil {
 		log.Printf("Signup error to server: %v", err)
 	}
 }

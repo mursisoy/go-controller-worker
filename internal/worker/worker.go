@@ -26,6 +26,11 @@ type Worker struct {
 // 	port int
 // }
 
+func init() {
+	gob.Register(common.SignupRequest{})
+	gob.Register(common.SignupResponse{})
+}
+
 // NewWorker creates a new instance of the worker.
 func NewWorker() *Worker {
 	return &Worker{
@@ -52,7 +57,7 @@ func (w *Worker) Start() {
 	// Main loop to handle connections
 	log.Printf("Worker listener started: %v\n", listener.Addr().String())
 
-	if ok := w.signup(common.SignupRequest{Address: listener.Addr().String()}); !ok {
+	if ok := w.signup(listener.Addr().String()); !ok {
 		log.Printf("Signup failed. Exiting.\n")
 		return
 	}
@@ -72,7 +77,8 @@ func (w *Worker) Start() {
 	}
 }
 
-func (w *Worker) signup(message common.SignupRequest) bool {
+func (w *Worker) signup(address string) bool {
+
 	// Connect to the server
 	conn, err := net.Dial("tcp", ":8080")
 	if err != nil {
@@ -81,23 +87,35 @@ func (w *Worker) signup(message common.SignupRequest) bool {
 	}
 	defer conn.Close()
 
+	signupRequest := common.SignupRequest{Address: address}
+
+	var request interface{} = signupRequest
 	encoder := gob.NewEncoder(conn)
-	if err = encoder.Encode(message); err != nil {
+	if err = encoder.Encode(&request); err != nil {
 		log.Printf("Signup error to server: %v\n", err)
 		return false
 	}
-	var signupResponse common.SignupResponse
+
+	var response interface{}
 	decoder := gob.NewDecoder(conn)
-	if err := decoder.Decode(&signupResponse); err != nil {
+	if err := decoder.Decode(&response); err != nil {
 		log.Printf("Error decoding message: %v\n", err)
 		return false
 	}
-	if signupResponse.Success {
-		return true
-	} else {
-		log.Printf("Signup error: %v\n", signupResponse.Message)
+	switch mt := response.(type) {
+	case common.SignupResponse:
+		signupResponse := response.(common.SignupResponse)
+		if signupResponse.Success {
+			return true
+		} else {
+			log.Printf("Signup error: %v\n", signupResponse.Message)
+			return false
+		}
+	default:
+		log.Printf("Signup error, received message type %v: %v,\n", mt, response)
 		return false
 	}
+
 }
 
 // Shutdown gracefully shuts down the worker and worker nodes.
