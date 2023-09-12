@@ -82,9 +82,9 @@ func (fd *FailureDetector) monitorWorker(address string, done chan struct{}) {
 			log.Printf("Sending heartbeat to %v at %v", address, t)
 			if ok := heartbeat(address); !ok {
 				ticker.Stop()
+				fd.unwatchWorker <- address
 				fd.failedWorker <- address
 			}
-
 		}
 	}
 }

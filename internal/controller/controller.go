@@ -56,7 +56,6 @@ func (c *Controller) Start() {
 			return
 		case workerAddress := <-c.failedWorker:
 			log.Printf("Worker %v failed\n", workerAddress)
-			c.failureDetector.unwatchWorker <- workerAddress
 		}
 	}
 
