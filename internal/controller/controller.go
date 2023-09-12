@@ -14,18 +14,10 @@ type Controller struct {
 	// listener net.Listener
 	// pendingJobs      []job
 	// assignedJobs     map[worker]job
-	// availableWorkers []worker
+	availableWorkers map[string]struct{}
+	failureDetector  *FailureDetector
+	failedWorker     chan string
 }
-
-// type job struct {
-// 	id      int
-// 	jobType string
-// }
-
-// type worker struct {
-// 	ip   string
-// 	port int
-// }
 
 func init() {
 	gob.Register(common.SignupRequest{})
@@ -35,26 +27,42 @@ func init() {
 // NewController creates a new instance of the controller.
 func NewController() *Controller {
 	return &Controller{
-		shutdown: make(chan struct{}),
+		shutdown:         make(chan struct{}),
+		failureDetector:  newFailureDetector(),
+		availableWorkers: make(map[string]struct{}),
+		failedWorker:     make(chan string),
 	}
 }
 
 func (c *Controller) Start() {
-	listener, err := net.Listen("tcp", "localhost:8080")
+	// Starts a listener
+	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		log.Printf("Controller failed to start listener: %v\n", err)
 		return
 	}
 	defer listener.Close()
 
-	// Go routine to handle shutdowns
-	go func() {
-		shutdown := <-c.shutdown
-		_ = shutdown
-		log.Printf("Shutdown received. Cleaning up....")
-		listener.Close()
-	}()
+	go c.failureDetector.Start(c.failedWorker)
 
+	go c.startListener(listener)
+
+	// Go routine to handle channels
+	for {
+		select {
+		case <-c.shutdown:
+			c.failureDetector.Shutdown()
+			log.Printf("Shutdown received. Cleaning up....")
+			return
+		case workerAddress := <-c.failedWorker:
+			log.Printf("Worker %v failed\n", workerAddress)
+			c.failureDetector.unwatchWorker <- workerAddress
+		}
+	}
+
+}
+
+func (c *Controller) startListener(listener net.Listener) {
 	// Main loop to handle connections
 	log.Printf("Controller listener started: %v\n", listener.Addr().String())
 	for {
@@ -81,6 +89,8 @@ func (c *Controller) Shutdown() {
 // HandleClient handles incoming client connections for the controller.
 func (c *Controller) HandleClient(conn net.Conn) {
 	defer conn.Close()
+
+	// Decode the message received or fail
 	var data interface{}
 	decoder := gob.NewDecoder(conn)
 	if err := decoder.Decode(&data); err != nil {
@@ -88,22 +98,33 @@ func (c *Controller) HandleClient(conn net.Conn) {
 		return
 	}
 
+	// Switch between decoded messages
 	switch mt := data.(type) {
 	case common.SignupRequest:
 		c.handleSignupRequest(data.(common.SignupRequest), conn)
 	default:
 		log.Printf("%v message type received but not handled", mt)
 	}
-
 }
 
+// Handles signup requests from client
 func (c *Controller) handleSignupRequest(signupRequest common.SignupRequest, conn net.Conn) {
 	log.Printf("New signup request from %v\n", signupRequest.Address)
-	var signupResponse = common.SignupResponse{Response: common.Response{Success: true}}
 
+	if _, ok := c.availableWorkers[signupRequest.Address]; !ok {
+		c.availableWorkers[signupRequest.Address] = struct{}{}
+		log.Printf("Worker %v added to available workers\n", signupRequest.Address)
+	} else {
+		log.Printf("Worker %v already in available workers\n", signupRequest.Address)
+	}
+
+	var signupResponse = common.SignupResponse{Response: common.Response{Success: true}}
 	encoder := gob.NewEncoder(conn)
 	var response interface{} = signupResponse
 	if err := encoder.Encode(&response); err != nil {
 		log.Printf("Signup error to server: %v", err)
 	}
+
+	// monitorWorkerRequest := common.MonitorWorkerRequest{Address: signupRequest.Address}
+	c.failureDetector.watchWorker <- signupRequest.Address
 }

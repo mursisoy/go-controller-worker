@@ -29,6 +29,8 @@ type Worker struct {
 func init() {
 	gob.Register(common.SignupRequest{})
 	gob.Register(common.SignupResponse{})
+	gob.Register(common.Ping{})
+	gob.Register(common.Pong{})
 }
 
 // NewWorker creates a new instance of the worker.
@@ -128,8 +130,33 @@ func (w *Worker) Shutdown() {
 func (w *Worker) HandleClient(conn net.Conn) {
 	defer conn.Close()
 
+	// Decode the message received or fail
+	var data interface{}
+	decoder := gob.NewDecoder(conn)
+	if err := decoder.Decode(&data); err != nil {
+		log.Printf("Error decoding message: %v\n", err)
+		return
+	}
+
+	// Switch between decoded messages
+	switch mt := data.(type) {
+	case common.Ping:
+		w.handleHeartbeat(data.(common.Ping), conn)
+	default:
+		log.Printf("%v message type received but not handled", mt)
+	}
 	// for {
 	// 	// Implement your worker's server logic here
 	// 	// For example, handle commands received from workers
 	// }
+}
+
+func (w *Worker) handleHeartbeat(pingRequest common.Ping, conn net.Conn) {
+	log.Printf("New ping request from %v\n", conn.RemoteAddr())
+	var pongResponse = common.Pong{}
+	encoder := gob.NewEncoder(conn)
+	var response interface{} = pongResponse
+	if err := encoder.Encode(&response); err != nil {
+		log.Printf("Pong error to server: %v", err)
+	}
 }
