@@ -13,14 +13,6 @@ type SignupResponse struct {
 	Response
 }
 
-type MonitorWorkerRequest struct {
-	Address string
-}
-
-type MonitorWorkerResponse struct {
-	Response
-}
-
 type JobSubmitRequest struct {
 	JobType string
 	JobId   string
@@ -36,14 +28,6 @@ type JobDoneRequest struct {
 }
 
 type JobDoneResponse struct {
-	Response
-}
-
-type WorkerFailureRequest struct {
-	Address string
-}
-
-type WokerFailureRespnse struct {
 	Response
 }
 
