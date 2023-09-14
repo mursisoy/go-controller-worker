@@ -6,6 +6,7 @@ type Response struct {
 }
 
 type SignupRequest struct {
+	Id      string
 	Address string
 }
 

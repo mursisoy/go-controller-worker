@@ -11,12 +11,10 @@ import (
 type Controller struct {
 	// workers          []int
 	shutdown chan struct{}
-	// listener net.Listener
-	// pendingJobs      []job
-	// assignedJobs     map[worker]job
-	availableWorkers map[string]struct{}
-	failureDetector  *FailureDetector
-	failedWorker     chan string
+
+	workerRegistry  *workerRegistry
+	failureDetector *failureDetector
+	failedWorker    chan string
 }
 
 func init() {
@@ -27,10 +25,10 @@ func init() {
 // NewController creates a new instance of the controller.
 func NewController() *Controller {
 	return &Controller{
-		shutdown:         make(chan struct{}),
-		failureDetector:  newFailureDetector(),
-		availableWorkers: make(map[string]struct{}),
-		failedWorker:     make(chan string),
+		shutdown:        make(chan struct{}),
+		failureDetector: newFailureDetector(),
+		workerRegistry:  newWorkerRegistry(),
+		failedWorker:    make(chan string, 5),
 	}
 }
 
@@ -54,8 +52,9 @@ func (c *Controller) Start() {
 			c.failureDetector.Shutdown()
 			log.Printf("Shutdown received. Cleaning up....")
 			return
-		case workerAddress := <-c.failedWorker:
-			log.Printf("Worker %v failed\n", workerAddress)
+		case workerId := <-c.failedWorker:
+			log.Printf("Worker %v failed\n", workerId)
+			c.workerRegistry.deregisterWorker(workerId)
 		}
 	}
 
@@ -101,6 +100,8 @@ func (c *Controller) HandleClient(conn net.Conn) {
 	switch mt := data.(type) {
 	case common.SignupRequest:
 		c.handleSignupRequest(data.(common.SignupRequest), conn)
+	case common.JobSubmitRequest:
+		c.handleJobSubmitRequest(data.(common.JobSubmitRequest), conn)
 	default:
 		log.Printf("%v message type received but not handled", mt)
 	}
@@ -108,13 +109,18 @@ func (c *Controller) HandleClient(conn net.Conn) {
 
 // Handles signup requests from client
 func (c *Controller) handleSignupRequest(signupRequest common.SignupRequest, conn net.Conn) {
-	log.Printf("New signup request from %v\n", signupRequest.Address)
 
-	if _, ok := c.availableWorkers[signupRequest.Address]; !ok {
-		c.availableWorkers[signupRequest.Address] = struct{}{}
-		log.Printf("Worker %v added to available workers\n", signupRequest.Address)
+	log.Printf("New signup request from %v\n", signupRequest.Id)
+
+	workerInfo := workerInfo{
+		id:      signupRequest.Id,
+		address: signupRequest.Address,
+	}
+
+	if c.workerRegistry.registerWorker(workerInfo) {
+		log.Printf("Worker %v added to available workers\n", signupRequest.Id)
 	} else {
-		log.Printf("Worker %v already in available workers\n", signupRequest.Address)
+		log.Printf("Worker %v already in available workers\n", signupRequest.Id)
 	}
 
 	var signupResponse = common.SignupResponse{Response: common.Response{Success: true}}
@@ -125,5 +131,9 @@ func (c *Controller) handleSignupRequest(signupRequest common.SignupRequest, con
 	}
 
 	// monitorWorkerRequest := common.MonitorWorkerRequest{Address: signupRequest.Address}
-	c.failureDetector.watchWorker <- signupRequest.Address
+	c.failureDetector.watchWorker <- workerInfo
+}
+
+func (c *Controller) handleJobSubmitRequest(jobSubmitRequest common.JobSubmitRequest, conn net.Conn) {
+
 }

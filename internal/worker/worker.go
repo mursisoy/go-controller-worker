@@ -10,10 +10,19 @@ import (
 // Worker represents the central component for failure detection.
 type Worker struct {
 	// workers          []int
-	shutdown chan struct{}
+	shutdown          chan struct{}
+	controllerAddress string
+	listenAddress     string
+	id                string
 	// pendingJobs      []job
 	// assignedJobs     map[worker]job
 	// availableWorkers []worker
+}
+
+// WorkerConfig configures worker. See defaults in GetDefaultConfig.
+type WorkerConfig struct {
+	ControllerAddress string
+	ListenAddress     string
 }
 
 // type job struct {
@@ -34,14 +43,17 @@ func init() {
 }
 
 // NewWorker creates a new instance of the worker.
-func NewWorker() *Worker {
+func NewWorker(id string, config WorkerConfig) *Worker {
 	return &Worker{
-		shutdown: make(chan struct{}),
+		shutdown:          make(chan struct{}),
+		controllerAddress: config.ControllerAddress,
+		listenAddress:     config.ListenAddress,
+		id:                id,
 	}
 }
 
 func (w *Worker) Start() {
-	listener, err := net.Listen("tcp", ":0")
+	listener, err := net.Listen("tcp", w.listenAddress)
 	if err != nil {
 		log.Printf("Worker failed to start listener: %v\n", err)
 		return
@@ -59,7 +71,7 @@ func (w *Worker) Start() {
 	// Main loop to handle connections
 	log.Printf("Worker listener started: %v\n", listener.Addr().String())
 
-	if ok := w.signup(listener.Addr().String()); !ok {
+	if ok := w.signup(); !ok {
 		log.Printf("Signup failed. Exiting.\n")
 		return
 	}
@@ -79,17 +91,20 @@ func (w *Worker) Start() {
 	}
 }
 
-func (w *Worker) signup(address string) bool {
+func (w *Worker) signup() bool {
 
 	// Connect to the server
-	conn, err := net.Dial("tcp", ":8080")
+	conn, err := net.Dial("tcp", w.controllerAddress)
 	if err != nil {
 		log.Printf("Error connecting to server: %v\n", err)
 		return false
 	}
 	defer conn.Close()
 
-	signupRequest := common.SignupRequest{Address: address}
+	signupRequest := common.SignupRequest{
+		Id:      w.id,
+		Address: w.listenAddress,
+	}
 
 	var request interface{} = signupRequest
 	encoder := gob.NewEncoder(conn)
@@ -145,10 +160,6 @@ func (w *Worker) HandleClient(conn net.Conn) {
 	default:
 		log.Printf("%v message type received but not handled", mt)
 	}
-	// for {
-	// 	// Implement your worker's server logic here
-	// 	// For example, handle commands received from workers
-	// }
 }
 
 func (w *Worker) handleHeartbeat(pingRequest common.Ping, conn net.Conn) {
