@@ -68,6 +68,13 @@ job_manager:
 	GOARCH=amd64 GOOS=linux go build -o=./bin/job_manager-amd64 ./cmd/job_manager/job_manager.go
 	GOARCH=arm64 GOOS=linux go build -o=./bin/job_manager-arm64 ./cmd/job_manager/job_manager.go
 
+start_controller: controller
+	./bin/start_controller-amd64
+
+start_worker: worker
+	./bin/start_worker-amd64 -controller $(CONTROLLER_ADDRESS) -id $(WORKER_ID) -listen $(WORKER_LISTEN)
+
+
 ## clean: clean built files
 .PHONY: clean
 clean:
