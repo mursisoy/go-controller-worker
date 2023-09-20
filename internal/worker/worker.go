@@ -2,6 +2,7 @@ package worker
 
 import (
 	"encoding/gob"
+	"fmt"
 	"log"
 	"mursisoy/wordcount/internal/common"
 	"net"
@@ -71,8 +72,8 @@ func (w *Worker) Start() {
 	// Main loop to handle connections
 	log.Printf("Worker listener started: %v\n", listener.Addr().String())
 
-	if ok := w.signup(); !ok {
-		log.Printf("Signup failed. Exiting.\n")
+	if err := w.signup(); err != nil {
+		log.Printf("Signup failed: %v. Exiting.\n", err)
 		return
 	}
 
@@ -91,13 +92,13 @@ func (w *Worker) Start() {
 	}
 }
 
-func (w *Worker) signup() bool {
+func (w *Worker) signup() error {
 
 	// Connect to the server
 	conn, err := net.Dial("tcp", w.controllerAddress)
+	// conn.SetDeadline(time.Now().Add(1 * time.Second))
 	if err != nil {
-		log.Printf("Error connecting to server: %v\n", err)
-		return false
+		return fmt.Errorf("error connecting to server: %v", err)
 	}
 	defer conn.Close()
 
@@ -109,28 +110,24 @@ func (w *Worker) signup() bool {
 	var request interface{} = signupRequest
 	encoder := gob.NewEncoder(conn)
 	if err = encoder.Encode(&request); err != nil {
-		log.Printf("Signup error to server: %v\n", err)
-		return false
+		return fmt.Errorf("signup error to server: %v", err)
 	}
 
 	var response interface{}
 	decoder := gob.NewDecoder(conn)
 	if err := decoder.Decode(&response); err != nil {
-		log.Printf("Error decoding message: %v\n", err)
-		return false
+		return fmt.Errorf("error decoding message: %v", err)
 	}
 	switch mt := response.(type) {
 	case common.SignupResponse:
 		signupResponse := response.(common.SignupResponse)
 		if signupResponse.Success {
-			return true
+			return nil
 		} else {
-			log.Printf("Signup error: %v\n", signupResponse.Message)
-			return false
+			return fmt.Errorf("signup error: %v", signupResponse.Message)
 		}
 	default:
-		log.Printf("Signup error, received message type %v: %v,\n", mt, response)
-		return false
+		return fmt.Errorf("signup error, received message type %v: %v", mt, response)
 	}
 
 }
