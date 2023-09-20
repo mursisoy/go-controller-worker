@@ -7,11 +7,16 @@ import (
 	"net"
 )
 
+// WorkerConfig configures worker. See defaults in GetDefaultConfig.
+type ControllerConfig struct {
+	ListenAddress string
+}
+
 // Controller represents the central component for failure detection.
 type Controller struct {
-	// workers          []int
-	shutdown chan struct{}
-
+	id              string
+	listenAddress   string
+	shutdown        chan struct{}
 	workerRegistry  *workerRegistry
 	failureDetector *failureDetector
 	failedWorker    chan string
@@ -23,18 +28,20 @@ func init() {
 }
 
 // NewController creates a new instance of the controller.
-func NewController() *Controller {
+func NewController(id string, config ControllerConfig) *Controller {
 	return &Controller{
+		listenAddress:   config.ListenAddress,
 		shutdown:        make(chan struct{}),
 		failureDetector: newFailureDetector(),
 		workerRegistry:  newWorkerRegistry(),
 		failedWorker:    make(chan string, 5),
+		id:              id,
 	}
 }
 
 func (c *Controller) Start() {
 	// Starts a listener
-	listener, err := net.Listen("tcp", ":8080")
+	listener, err := net.Listen("tcp", c.listenAddress)
 	if err != nil {
 		log.Printf("Controller failed to start listener: %v\n", err)
 		return
