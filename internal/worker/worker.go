@@ -1,17 +1,20 @@
 package worker
 
 import (
+	"context"
 	"encoding/gob"
 	"fmt"
 	"log"
 	"mursisoy/wordcount/internal/common"
 	"net"
+	"sync"
 )
 
 // Worker represents the central component for failure detection.
 type Worker struct {
 	// workers          []int
-	shutdown          chan struct{}
+	done              chan struct{}
+	wg                sync.WaitGroup
 	controllerAddress string
 	listenAddress     string
 	id                string
@@ -46,50 +49,60 @@ func init() {
 // NewWorker creates a new instance of the worker.
 func NewWorker(id string, config WorkerConfig) *Worker {
 	return &Worker{
-		shutdown:          make(chan struct{}),
+		done:              make(chan struct{}),
 		controllerAddress: config.ControllerAddress,
 		listenAddress:     config.ListenAddress,
 		id:                id,
 	}
 }
 
-func (w *Worker) Start() {
-	listener, err := net.Listen("tcp", w.listenAddress)
+func (w *Worker) Done() <-chan struct{} {
+	return w.done
+}
+
+func (w *Worker) Start(ctx context.Context) (net.Addr, error) {
+	var lc net.ListenConfig
+
+	listener, err := lc.Listen(ctx, "tcp", w.listenAddress)
 	if err != nil {
-		log.Printf("Worker failed to start listener: %v\n", err)
-		return
+		return nil, fmt.Errorf("worker failed to start listener: %v", err)
 	}
-	defer listener.Close()
 
 	// Go routine to handle shutdowns
 	go func() {
-		shutdown := <-w.shutdown
-		_ = shutdown
-		log.Printf("Shutdown received. Cleaning up....\n")
+		<-ctx.Done()
 		listener.Close()
+		log.Printf("Shutdown received. Cleaning up....\n")
+		w.wg.Wait()
+		close(w.done)
 	}()
 
 	// Main loop to handle connections
 	log.Printf("Worker listener started: %v\n", listener.Addr().String())
 
 	if err := w.signup(); err != nil {
-		log.Printf("Signup failed: %v. Exiting.\n", err)
-		return
+		return nil, fmt.Errorf("signup failed: %v. Exiting", err)
 	}
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			// Check if the error is due to listener closure
-			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
-				return // Listener was closed
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				// Check if the error is due to listener closure
+				if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
+					log.Printf("Closed network connection: %v", err)
+					return
+				}
+				log.Printf("Error accepting connection: %v\n", err)
+				return
 			}
-			log.Printf("Error accepting connection: %v\n", err)
-			return
+			go w.HandleClient(conn)
 		}
+	}()
 
-		go w.HandleClient(conn)
-	}
+	return listener.Addr(), nil
 }
 
 func (w *Worker) signup() error {
@@ -132,14 +145,10 @@ func (w *Worker) signup() error {
 
 }
 
-// Shutdown gracefully shuts down the worker and worker nodes.
-func (w *Worker) Shutdown() {
-	log.Printf("Received Shutdown call")
-	close(w.shutdown) // Close the worker's shutdown channel
-}
-
 // HandleClient handles incoming client connections for the worker.
 func (w *Worker) HandleClient(conn net.Conn) {
+	w.wg.Add(1)
+	defer w.wg.Done()
 	defer conn.Close()
 
 	// Decode the message received or fail

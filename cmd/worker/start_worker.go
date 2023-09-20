@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"mursisoy/wordcount/internal/worker"
@@ -13,12 +14,12 @@ func main() {
 	// Create a channel to receive signals.
 	sigCh := make(chan os.Signal, 1)
 
-	var controllerAddress, listenAddress string
+	var controllerAddress, listenAddress, id string
 
 	flag.StringVar(&controllerAddress, "controller", "", "The controller address")
 	flag.StringVar(&listenAddress, "listen", ":0", "The worker listen port")
 
-	id := flag.String("id", "", "The worker id")
+	flag.StringVar(&id, "id", "", "The worker id")
 
 	// Enable command-line parsing
 	flag.Parse()
@@ -35,15 +36,22 @@ func main() {
 
 	// Notify the sigCh channel for SIGINT (Ctrl+C) and SIGTERM (termination) signals.
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	worker := worker.NewWorker(*id, workerConfig)
+	worker := worker.NewWorker(id, workerConfig)
+
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
 
 	// Goroutine to catch shutdown signals
 	go func() {
 		sig := <-sigCh
 		log.Printf("Received signal: %v\n", sig)
-		worker.Shutdown()
+		cancel()
 	}()
 
-	worker.Start()
+	if _, err := worker.Start(ctx); err != nil {
+		cancel()
+	}
+	<-ctx.Done()
+	<-worker.Done()
 	log.Printf("Exited\n")
 }
