@@ -6,6 +6,7 @@ import (
 	"mursisoy/wordcount/internal/controller"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -29,13 +30,19 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	controller := controller.NewController(id, controllerConfig)
 
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+
 	// Goroutine to catch shutdown signals
 	go func() {
+		defer wg.Done()
 		sig := <-sigCh
 		log.Printf("Received signal: %v\n", sig)
-		controller.Shutdown()
+		<-controller.Shutdown()
 	}()
 
 	controller.Start()
+	wg.Wait()
 	log.Printf("Exited\n")
 }

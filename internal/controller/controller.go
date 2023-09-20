@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/gob"
+	"fmt"
 	"log"
 	"mursisoy/wordcount/internal/common"
 	"net"
@@ -17,6 +18,7 @@ type Controller struct {
 	id              string
 	listenAddress   string
 	shutdown        chan struct{}
+	done            chan struct{}
 	workerRegistry  *workerRegistry
 	failureDetector *failureDetector
 	failedWorker    chan string
@@ -32,6 +34,7 @@ func NewController(id string, config ControllerConfig) *Controller {
 	return &Controller{
 		listenAddress:   config.ListenAddress,
 		shutdown:        make(chan struct{}),
+		done:            make(chan struct{}),
 		failureDetector: newFailureDetector(),
 		workerRegistry:  newWorkerRegistry(),
 		failedWorker:    make(chan string, 5),
@@ -39,31 +42,34 @@ func NewController(id string, config ControllerConfig) *Controller {
 	}
 }
 
-func (c *Controller) Start() {
+func (c *Controller) Start() (net.Addr, error) {
 	// Starts a listener
 	listener, err := net.Listen("tcp", c.listenAddress)
 	if err != nil {
-		log.Printf("Controller failed to start listener: %v\n", err)
-		return
+		return nil, fmt.Errorf("controller failed to start listener: %v", err)
 	}
-	defer listener.Close()
-
 	go c.failureDetector.Start(c.failedWorker)
 
 	go c.startListener(listener)
 
-	// Go routine to handle channels
-	for {
-		select {
-		case <-c.shutdown:
-			c.failureDetector.Shutdown()
-			log.Printf("Shutdown received. Cleaning up....")
-			return
-		case workerId := <-c.failedWorker:
-			log.Printf("Worker %v failed\n", workerId)
-			c.workerRegistry.deregisterWorker(workerId)
+	go func() {
+		// Go routine to handle channels
+		for {
+			select {
+			case <-c.shutdown:
+				listener.Close()
+				<-c.failureDetector.Shutdown()
+				log.Printf("Shutdown received. Cleaning up....")
+				close(c.done)
+				return
+			case workerId := <-c.failedWorker:
+				log.Printf("Worker %v failed\n", workerId)
+				c.workerRegistry.deregisterWorker(workerId)
+			}
 		}
-	}
+	}()
+
+	return listener.Addr(), nil
 
 }
 
@@ -86,9 +92,10 @@ func (c *Controller) startListener(listener net.Listener) {
 }
 
 // Shutdown gracefully shuts down the controller and worker nodes.
-func (c *Controller) Shutdown() {
+func (c *Controller) Shutdown() <-chan struct{} {
 	log.Printf("Received Shutdown call")
 	close(c.shutdown) // Close the controller's shutdown channel
+	return c.done
 }
 
 // HandleClient handles incoming client connections for the controller.

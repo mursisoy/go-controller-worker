@@ -9,6 +9,7 @@ import (
 )
 
 type failureDetector struct {
+	done           chan struct{}
 	shutdown       chan struct{}
 	watchWorker    chan workerInfo
 	unwatchWorker  chan string
@@ -23,6 +24,7 @@ func init() {
 
 func newFailureDetector() *failureDetector {
 	return &failureDetector{
+		done:           make(chan struct{}),
 		shutdown:       make(chan struct{}),
 		watchWorker:    make(chan workerInfo, 5),
 		unwatchWorker:  make(chan string, 5),
@@ -30,9 +32,10 @@ func newFailureDetector() *failureDetector {
 	}
 }
 
-func (fd *failureDetector) Shutdown() {
+func (fd *failureDetector) Shutdown() <-chan struct{} {
 	log.Printf("Failure detector shutdown received. Cleaning up....")
 	close(fd.shutdown)
+	return fd.done
 }
 
 func (fd *failureDetector) Start(failedWorker chan string) {
@@ -45,6 +48,7 @@ func (fd *failureDetector) Start(failedWorker chan string) {
 				log.Printf("Stopping failure detector for worker %v", workerId)
 				close(done)
 			}
+			close(fd.done)
 			return
 
 		case workerInfo := <-fd.watchWorker:
