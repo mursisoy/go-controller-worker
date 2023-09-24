@@ -25,7 +25,7 @@ func main() {
 
 	controllerConfig := controller.ControllerConfig{
 		ListenAddress: listenAddress,
-		LogPriority:   clock.INFO,
+		LogPriority:   clock.DEBUG,
 	}
 
 	// Notify the sigCh channel for SIGINT (Ctrl+C) and SIGTERM (termination) signals.
