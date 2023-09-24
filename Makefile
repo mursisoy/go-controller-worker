@@ -74,6 +74,9 @@ start_controller: controller
 start_worker: worker
 	./bin/start_worker-amd64 -controller $(CONTROLLER_ADDRESS) -id $(WORKER_ID) -listen $(WORKER_LISTEN)
 
+shiviz: 
+	rm -f shiviz-*.log
+	cat *.log > shiviz-`date +%s`.log
 
 ## clean: clean built files
 .PHONY: clean

@@ -73,9 +73,10 @@ func (c *Controller) Start() (net.Addr, error) {
 				close(c.done)
 				return
 			case failedWorkerRequest := <-c.failedWorker:
-				c.clock.Merge(failedWorkerRequest.Clock)
+				c.clock.Tick()
+				cc := c.clock.Merge(failedWorkerRequest.Clock)
 				workerId := failedWorkerRequest.workerId
-				c.log.LogInfof(c.clock.Tick(), "Worker %v failed, deregistering", workerId)
+				c.log.LogInfof(cc, "Worker %v failed, deregistering", workerId)
 				c.workerRegistry.deregisterWorker(workerId)
 			}
 		}

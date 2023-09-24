@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"mursisoy/wordcount/internal/clock"
 	"mursisoy/wordcount/internal/worker"
 	"os"
 	"os/signal"
@@ -32,6 +33,7 @@ func main() {
 	workerConfig := worker.WorkerConfig{
 		ControllerAddress: controllerAddress,
 		ListenAddress:     listenAddress,
+		LogPriority:       clock.DEBUG,
 	}
 
 	// Notify the sigCh channel for SIGINT (Ctrl+C) and SIGTERM (termination) signals.

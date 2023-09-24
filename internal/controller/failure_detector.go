@@ -71,12 +71,13 @@ func (fd *failureDetector) Start(failedWorker chan<- failedWorkerRequest) {
 			return
 
 		case watchWorkerRequest := <-fd.watchWorker:
-			fd.clock.Merge(watchWorkerRequest.Clock)
+			fd.clock.Tick()
+			cc := fd.clock.Merge(watchWorkerRequest.Clock)
 			workerInfo := watchWorkerRequest.workerInfo
 			if _, ok := fd.watchedWorkers[workerInfo.id]; ok {
 				close(fd.watchedWorkers[workerInfo.id])
 			}
-			fd.log.LogInfof(fd.clock.Tick(), "Watching worker %v", workerInfo.id)
+			fd.log.LogInfof(cc, "Watching worker %v", workerInfo.id)
 			done := make(chan struct{})
 			fd.watchedWorkers[workerInfo.id] = done
 			go fd.monitorWorker(workerInfo, done)
@@ -128,14 +129,18 @@ func (fd *failureDetector) heartbeat(workerInfo workerInfo) bool {
 		fd.log.LogInfof(fd.clock.Tick(), "Error connecting to worker: %v", err)
 		return false
 	}
-	pingRequest := common.Ping{}
 
+	cc := fd.clock.Tick()
+	fd.log.LogInfof(cc, "New ping request to %s (%v)", workerInfo.id, workerInfo.address)
+
+	pingRequest := common.Ping{ClockPayload: clock.ClockPayload{Clock: cc, Pid: fd.pid}}
 	var request interface{} = pingRequest
 	encoder := gob.NewEncoder(conn)
 	if err = encoder.Encode(&request); err != nil {
 		fd.log.LogInfof(fd.clock.Tick(), "Ping error to worker: %v", err)
 		return false
 	}
+
 	conn.SetDeadline(time.Now().Add(1 * time.Second))
 	var response interface{}
 	decoder := gob.NewDecoder(conn)
@@ -143,13 +148,14 @@ func (fd *failureDetector) heartbeat(workerInfo workerInfo) bool {
 		fd.log.LogInfof(fd.clock.Tick(), "Error decoding message: %v", err)
 		return false
 	}
-
+	cc = fd.clock.Tick()
 	switch mt := response.(type) {
 	case common.Pong:
-		fd.log.LogInfof(fd.clock.Tick(), "Pong received from %v (%v)", workerInfo.id, conn.RemoteAddr().String())
+		cc = fd.clock.Merge(mt.Clock)
+		fd.log.LogInfof(cc, "Pong received from %v (%v)", workerInfo.id, conn.RemoteAddr().String())
 		return true
 	default:
-		fd.log.LogInfof(fd.clock.Tick(), "Pong error, received message type %v from %v(%v): %v", mt, workerInfo.id, conn.RemoteAddr().String(), response)
+		fd.log.LogInfof(cc, "Pong error, received message type %v from %v(%v): %v", mt, workerInfo.id, conn.RemoteAddr().String(), response)
 		return false
 	}
 }
