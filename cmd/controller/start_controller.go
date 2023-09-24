@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"mursisoy/wordcount/internal/clock"
 	"mursisoy/wordcount/internal/controller"
 	"os"
 	"os/signal"
@@ -17,13 +18,14 @@ func main() {
 	var listenAddress, id string
 	flag.StringVar(&listenAddress, "listen", ":0", "The worker listen port")
 
-	flag.StringVar(&id, "id", "", "The worker id")
+	flag.StringVar(&id, "id", "controller", "The worker id")
 
 	// Enable command-line parsing
 	flag.Parse()
 
 	controllerConfig := controller.ControllerConfig{
 		ListenAddress: listenAddress,
+		LogPriority:   clock.INFO,
 	}
 
 	// Notify the sigCh channel for SIGINT (Ctrl+C) and SIGTERM (termination) signals.

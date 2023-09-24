@@ -2,19 +2,32 @@ package controller
 
 import (
 	"encoding/gob"
-	"log"
+	"mursisoy/wordcount/internal/clock"
 	"mursisoy/wordcount/internal/common"
 	"net"
 	"time"
 )
 
+type watchWorkerRequest struct {
+	clock.ClockPayload
+	workerInfo workerInfo
+}
+
+type failedWorkerRequest struct {
+	clock.ClockPayload
+	workerId workerId
+}
+
 type failureDetector struct {
+	pid            string
 	done           chan struct{}
 	shutdown       chan struct{}
-	watchWorker    chan workerInfo
-	unwatchWorker  chan string
-	failedWorker   chan string
-	watchedWorkers map[string]chan struct{}
+	watchWorker    chan watchWorkerRequest
+	unwatchWorker  chan workerId
+	failedWorker   chan<- failedWorkerRequest
+	watchedWorkers map[workerId]chan struct{}
+	clock          *clock.Clock
+	log            *clock.ClockLogger
 }
 
 func init() {
@@ -22,52 +35,60 @@ func init() {
 	gob.Register(common.Pong{})
 }
 
-func newFailureDetector() *failureDetector {
+func newFailureDetector(pid string) *failureDetector {
 	return &failureDetector{
+		pid:            pid,
 		done:           make(chan struct{}),
 		shutdown:       make(chan struct{}),
-		watchWorker:    make(chan workerInfo, 5),
-		unwatchWorker:  make(chan string, 5),
-		watchedWorkers: make(map[string]chan struct{}),
+		watchWorker:    make(chan watchWorkerRequest, 1),
+		unwatchWorker:  make(chan workerId, 1),
+		watchedWorkers: make(map[workerId]chan struct{}),
+		clock:          clock.NewClock(pid),
+		log:            clock.NewClockLog(pid, pid, clock.ClockLogConfig{}),
 	}
 }
 
 func (fd *failureDetector) Shutdown() <-chan struct{} {
-	log.Printf("Failure detector shutdown received. Cleaning up....")
+	fd.log.LogInfof(fd.clock.Tick(), "Failure detector shutdown received")
 	close(fd.shutdown)
 	return fd.done
 }
 
-func (fd *failureDetector) Start(failedWorker chan string) {
+func (fd *failureDetector) Start(failedWorker chan<- failedWorkerRequest) {
+	fd.log.LogInfof(fd.clock.Tick(), "Failure detector started")
 	fd.failedWorker = failedWorker
 	for {
 		select {
 		case <-fd.shutdown:
-			log.Printf("Failure detector shutdown")
+			fd.log.LogInfof(fd.clock.Tick(), "Failure detector shutdown. Cleaning up")
 			for workerId, done := range fd.watchedWorkers {
-				log.Printf("Stopping failure detector for worker %v", workerId)
+				fd.log.LogInfof(fd.clock.Tick(), "Stopping failure detector for worker %v", workerId)
 				close(done)
 			}
+			fd.log.LogInfof(fd.clock.Tick(), "Failure detector shutdown. Cleaning done")
+			fd.log.Close()
 			close(fd.done)
 			return
 
-		case workerInfo := <-fd.watchWorker:
+		case watchWorkerRequest := <-fd.watchWorker:
+			fd.clock.Merge(watchWorkerRequest.Clock)
+			workerInfo := watchWorkerRequest.workerInfo
 			if _, ok := fd.watchedWorkers[workerInfo.id]; ok {
 				close(fd.watchedWorkers[workerInfo.id])
 			}
-			log.Printf("Watching worker %v", workerInfo.id)
+			fd.log.LogInfof(fd.clock.Tick(), "Watching worker %v", workerInfo.id)
 			done := make(chan struct{})
 			fd.watchedWorkers[workerInfo.id] = done
 			go fd.monitorWorker(workerInfo, done)
 
 		case workerId := <-fd.unwatchWorker:
-			log.Printf("Un-watching worker %v", workerId)
+			fd.log.LogInfof(fd.clock.Tick(), "Un-watching worker %v", workerId)
 			if _, ok := fd.watchedWorkers[workerId]; ok {
-				log.Printf("Stopping failure detector for worker %v", workerId)
+				fd.log.LogInfof(fd.clock.Tick(), "Stopping failure detector for worker %v", workerId)
 				close(fd.watchedWorkers[workerId])
 				delete(fd.watchedWorkers, workerId)
 			} else {
-				log.Printf("Worker was not under observation %v", workerId)
+				fd.log.LogInfof(fd.clock.Tick(), "Worker was not under observation %v", workerId)
 			}
 		}
 
@@ -80,23 +101,31 @@ func (fd *failureDetector) monitorWorker(workerInfo workerInfo, done chan struct
 		select {
 		case <-done:
 			ticker.Stop()
-			log.Printf("Failure detector for worker %v stopped", workerInfo.id)
+			fd.log.LogInfof(fd.clock.Tick(), "Failure detector for worker %v stopped", workerInfo.id)
 			return
 		case t := <-ticker.C:
-			log.Printf("Sending heartbeat to %v at %v", workerInfo.id, t)
-			if ok := heartbeat(workerInfo); !ok {
+			fd.log.LogInfof(fd.clock.Tick(), "Sending heartbeat to %v at %v", workerInfo.id, t)
+			if ok := fd.heartbeat(workerInfo); !ok {
+				cc := fd.clock.Tick()
+				fd.log.LogErrorf(cc, "Heartbeat to %v at %v failed", workerInfo.id, t)
 				ticker.Stop()
 				fd.unwatchWorker <- workerInfo.id
-				fd.failedWorker <- workerInfo.id
+				fd.failedWorker <- failedWorkerRequest{
+					ClockPayload: clock.ClockPayload{
+						Clock: cc,
+						Pid:   fd.pid,
+					},
+					workerId: workerInfo.id,
+				}
 			}
 		}
 	}
 }
 
-func heartbeat(workerInfo workerInfo) bool {
-	conn, err := net.Dial("tcp", workerInfo.address)
+func (fd *failureDetector) heartbeat(workerInfo workerInfo) bool {
+	conn, err := net.Dial("tcp", string(workerInfo.address))
 	if err != nil {
-		log.Printf("Error connecting to worker: %v\n", err)
+		fd.log.LogInfof(fd.clock.Tick(), "Error connecting to worker: %v", err)
 		return false
 	}
 	pingRequest := common.Ping{}
@@ -104,23 +133,23 @@ func heartbeat(workerInfo workerInfo) bool {
 	var request interface{} = pingRequest
 	encoder := gob.NewEncoder(conn)
 	if err = encoder.Encode(&request); err != nil {
-		log.Printf("Ping error to worker: %v\n", err)
+		fd.log.LogInfof(fd.clock.Tick(), "Ping error to worker: %v", err)
 		return false
 	}
 	conn.SetDeadline(time.Now().Add(1 * time.Second))
 	var response interface{}
 	decoder := gob.NewDecoder(conn)
 	if err := decoder.Decode(&response); err != nil {
-		log.Printf("Error decoding message: %v\n", err)
+		fd.log.LogInfof(fd.clock.Tick(), "Error decoding message: %v", err)
 		return false
 	}
 
 	switch mt := response.(type) {
 	case common.Pong:
-		log.Printf("Pong received from %v (%v)\n", workerInfo.id, conn.RemoteAddr().String())
+		fd.log.LogInfof(fd.clock.Tick(), "Pong received from %v (%v)", workerInfo.id, conn.RemoteAddr().String())
 		return true
 	default:
-		log.Printf("Pong error, received message type %v from %v(%v): %v,\n", mt, workerInfo.id, conn.RemoteAddr().String(), response)
+		fd.log.LogInfof(fd.clock.Tick(), "Pong error, received message type %v from %v(%v): %v", mt, workerInfo.id, conn.RemoteAddr().String(), response)
 		return false
 	}
 }

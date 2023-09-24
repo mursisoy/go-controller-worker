@@ -69,7 +69,7 @@ job_manager:
 	GOARCH=arm64 GOOS=linux go build -o=./bin/job_manager-arm64 ./cmd/job_manager/job_manager.go
 
 start_controller: controller
-	./bin/start_controller-amd64
+	./bin/start_controller-amd64 -listen $(CONTROLLER_ADDRESS)
 
 start_worker: worker
 	./bin/start_worker-amd64 -controller $(CONTROLLER_ADDRESS) -id $(WORKER_ID) -listen $(WORKER_LISTEN)

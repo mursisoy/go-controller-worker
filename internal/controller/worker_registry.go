@@ -1,26 +1,29 @@
 package controller
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 )
 
+type workerId string
+type workerAddress string
+
 type workerInfo struct {
-	id      string
-	address string
+	id      workerId
+	address workerAddress
 }
 
 type workerRegistry struct {
-	registeredWorkers map[string]workerInfo
-	availableWorkers  map[string]struct{}
+	id                string
+	registeredWorkers map[workerId]workerInfo
+	availableWorkers  map[workerId]struct{}
 	registryMutex     sync.Mutex
 }
 
-func newWorkerRegistry() *workerRegistry {
+func newWorkerRegistry(id string) *workerRegistry {
 	return &workerRegistry{
-		registeredWorkers: make(map[string]workerInfo),
-		availableWorkers:  make(map[string]struct{}),
+		registeredWorkers: make(map[workerId]workerInfo),
+		availableWorkers:  make(map[workerId]struct{}),
 	}
 }
 
@@ -35,28 +38,28 @@ func (wr *workerRegistry) registerWorker(wi workerInfo) bool {
 	return true
 }
 
-func (wr *workerRegistry) deregisterWorker(workerId string) bool {
+func (wr *workerRegistry) deregisterWorker(wid workerId) bool {
 	wr.registryMutex.Lock()
 	defer wr.registryMutex.Unlock()
 
-	if !wr.isRegistered(workerId) {
+	if !wr.isRegistered(wid) {
 		return false
 	}
 
-	delete(wr.availableWorkers, workerId)
-	delete(wr.registeredWorkers, workerId)
+	delete(wr.availableWorkers, wid)
+	delete(wr.registeredWorkers, wid)
 	return true
 }
 
-func (wr *workerRegistry) isAvailable(workerId string) bool {
-	if _, ok := wr.availableWorkers[workerId]; ok {
+func (wr *workerRegistry) isAvailable(wid workerId) bool {
+	if _, ok := wr.availableWorkers[wid]; ok {
 		return true
 	}
 	return false
 }
 
-func (wr *workerRegistry) isRegistered(workerId string) bool {
-	if _, ok := wr.registeredWorkers[workerId]; ok {
+func (wr *workerRegistry) isRegistered(wid workerId) bool {
+	if _, ok := wr.registeredWorkers[wid]; ok {
 		return true
 	}
 	return false
@@ -69,5 +72,5 @@ func (wr *workerRegistry) getAvailableWorker() (workerInfo, error) {
 		delete(wr.availableWorkers, worker)
 		return wr.registeredWorkers[worker], nil
 	}
-	return workerInfo{}, errors.New(fmt.Sprintf("No available workers at this moment"))
+	return workerInfo{}, fmt.Errorf("no available workers at this moment")
 }
