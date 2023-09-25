@@ -49,17 +49,18 @@ func NewController(pid string, config ControllerConfig) *Controller {
 
 func (c *Controller) Start() (net.Addr, error) {
 
-	c.log.LogDebugf(c.clock.Tick(), "Controller started failure detector")
-	go c.failureDetector.Start(c.failedWorker)
-
 	// Starts a listener
 	listener, err := net.Listen("tcp", c.listenAddress)
 	if err != nil {
 		c.log.LogErrorf(c.clock.Tick(), "controller failed to start listener: %v", err)
 		return nil, fmt.Errorf("controller failed to start listener: %v", err)
 	}
+
 	c.log.LogDebugf(c.clock.Tick(), "Controller listenting  on %s", listener.Addr().String())
 	go c.handleConnections(listener)
+
+	c.log.LogDebugf(c.clock.Tick(), "Controller started failure detector")
+	go c.failureDetector.Start(c.failedWorker)
 
 	go func() {
 		// Go routine to handle channels

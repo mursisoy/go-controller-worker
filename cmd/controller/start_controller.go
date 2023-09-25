@@ -44,7 +44,11 @@ func main() {
 		<-controller.Shutdown()
 	}()
 
-	controller.Start()
-	wg.Wait()
-	log.Printf("Exited\n")
+	if _, err := controller.Start(); err != nil {
+		log.Fatalf("Error starting controller: %v", err)
+	} else {
+		wg.Wait()
+		log.Printf("Exited\n")
+	}
+
 }
