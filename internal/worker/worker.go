@@ -65,6 +65,12 @@ func (w *Worker) Done() <-chan struct{} {
 	return w.done
 }
 
+func (w *Worker) shutdown() {
+	w.wg.Wait()
+	w.log.LogInfof(w.clock.Tick(), "worker %s shutdown", w.pid)
+	close(w.done)
+}
+
 func (w *Worker) Start(ctx context.Context) (net.Addr, error) {
 	var lc net.ListenConfig
 
@@ -72,6 +78,7 @@ func (w *Worker) Start(ctx context.Context) (net.Addr, error) {
 	if err != nil {
 		return nil, fmt.Errorf("worker failed to start listener: %v", err)
 	}
+	w.listenAddress = listener.Addr().String()
 
 	// Main loop to handle connections
 	w.log.LogInfof(w.clock.Tick(), "worker listener started: %v", listener.Addr().String())
@@ -81,16 +88,13 @@ func (w *Worker) Start(ctx context.Context) (net.Addr, error) {
 	go func() {
 		<-ctx.Done()
 		listener.Close()
-		w.wg.Wait()
-		w.log.LogInfof(w.clock.Tick(), "worker %s shutdown", w.pid)
-		close(w.done)
+		w.shutdown()
 	}()
 
 	if err := w.signup(); err != nil {
 		w.log.LogErrorf(w.clock.Tick(), "signup failed: %v. Exiting", err)
 		return nil, fmt.Errorf("signup failed: %v. Exiting", err)
 	}
-
 	return listener.Addr(), nil
 }
 
