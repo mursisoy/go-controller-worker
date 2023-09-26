@@ -97,7 +97,7 @@ func (fd *failureDetector) Start(failedWorker chan<- failedWorkerRequest) {
 }
 
 func (fd *failureDetector) monitorWorker(workerInfo workerInfo, done chan struct{}) {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	for {
 		select {
 		case <-done:
