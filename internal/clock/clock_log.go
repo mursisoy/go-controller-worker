@@ -33,12 +33,16 @@ var prefixLookup = [...]string{
 // LogConfig controls the logging parameters of Log and is taken as
 // input to Log initialization. See defaults in GetDefaultConfig.
 type ClockLogConfig struct {
+
 	// EncodingStrategy for customizable interoperability
 	EncodingStrategy func(interface{}) ([]byte, error)
 	// DecodingStrategy for customizable interoperability
 	DecodingStrategy func([]byte, interface{}) error
 	// Priority determines the minimum priority event to log
 	Priority LogPriority
+
+	LogFilename string
+	FileOutput  bool
 }
 
 type ClockLogger struct {
@@ -52,34 +56,44 @@ type ClockLogger struct {
 
 	// Internal logger for printing errors
 	logger *log.Logger
+
+	fileOutput bool
 }
 
 // InitGoVector returns a Log which generates a logs prefixed with
 // processid, to a file name logfilename.log. Any old log with the same
 // name will be trucated. Config controls logging options. See LogConfig for more details.
-func NewClockLog(pid string, logfilename string, config ClockLogConfig) *ClockLogger {
+func NewClockLog(pid string, config ClockLogConfig) *ClockLogger {
 
 	clockLog := &ClockLogger{}
 	clockLog.pid = pid
 	clockLog.priority = config.Priority
+	clockLog.fileOutput = config.FileOutput
 
 	//Starting File IO . If Log exists, Log Will be deleted and A New one will be created
-	logname := fmt.Sprintf("%s-%s.log", logfilename, pid)
-	logFile, err := os.Create(logname)
-	if err != nil {
-		log.Fatal(err)
-	}
-	clockLog.logfile = logFile
+	var mw io.Writer
 
-	mw := io.MultiWriter(os.Stdout, logFile)
+	if config.LogFilename != "" && clockLog.fileOutput {
+		logname := config.LogFilename
+		logFile, err := os.Create(logname)
+		if err != nil {
+			log.Fatal(err)
+		}
+		clockLog.logfile = logFile
+		mw = io.MultiWriter(os.Stdout, logFile)
+	} else {
+		mw = io.MultiWriter(os.Stdout)
+	}
 	clockLog.logger = log.New(mw, "", log.Lshortfile|log.Lmicroseconds)
 
 	return clockLog
 }
 
 func (cl *ClockLogger) Close() {
-	if err := cl.logfile.Close(); err != nil {
-		log.Printf("Failed to close log file: %v", err)
+	if cl.fileOutput {
+		if err := cl.logfile.Close(); err != nil {
+			log.Printf("Failed to close log file: %v", err)
+		}
 	}
 }
 

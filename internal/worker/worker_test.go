@@ -1,13 +1,19 @@
 package worker
 
 import (
+	"mursisoy/wordcount/internal/clock"
 	"mursisoy/wordcount/internal/controller"
 	"testing"
+	"time"
 )
 
 func TestSignup(t *testing.T) {
 	controllerConfig := controller.ControllerConfig{
 		ListenAddress: ":0",
+		LogPriority:   clock.DEBUG,
+		FailureDetectorConfig: controller.FailureDetectorConfig{
+			HeartBeatTicker: 2 * time.Second,
+		},
 	}
 	controller := controller.NewController("controller", controllerConfig)
 	controllerAddr, err := controller.Start()

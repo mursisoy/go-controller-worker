@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"mursisoy/wordcount/internal/clock"
 	"mursisoy/wordcount/internal/worker"
@@ -33,7 +34,11 @@ func main() {
 	workerConfig := worker.WorkerConfig{
 		ControllerAddress: controllerAddress,
 		ListenAddress:     listenAddress,
-		LogPriority:       clock.DEBUG,
+		ClockLogConfig: clock.ClockLogConfig{
+			Priority:    clock.DEBUG,
+			FileOutput:  true,
+			LogFilename: fmt.Sprintf("%s-w.log", id),
+		},
 	}
 
 	// Notify the sigCh channel for SIGINT (Ctrl+C) and SIGTERM (termination) signals.

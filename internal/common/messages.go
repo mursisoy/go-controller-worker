@@ -15,6 +15,16 @@ func RequestWithClock(pid string, cc clock.ClockMap) Request {
 	}
 }
 
+func ResponseWithClock(pid string, cc clock.ClockMap, success bool) Response {
+	return Response{
+		ClockPayload: clock.ClockPayload{
+			Pid:   pid,
+			Clock: cc,
+		},
+		Success: success,
+	}
+}
+
 type Response struct {
 	clock.ClockPayload
 	Success bool
@@ -33,22 +43,42 @@ type SignupResponse struct {
 
 type JobSubmitRequest struct {
 	Request
-	JobType string
-	JobId   string
+	Job Job
 }
-
 type JobSubmitResponse struct {
 	Response
+	Job Job
+}
+
+type TaskSubmitRequest struct {
+	Request
+	Task Task
+}
+type TaskSubmitResponse struct {
+	Response
+}
+
+type TaskDoneRequest struct {
+	Request
+	Task Task
+}
+type TaskDoneResponse struct {
+	Response
+}
+
+type JobStatusRequest struct {
+	Request
+}
+
+type JobStatusResponse struct {
+	Response
+	Job
 }
 
 type JobDoneRequest struct {
 	Request
 	JobType string
 	JobId   int
-}
-
-type JobDoneResponse struct {
-	Response
 }
 
 type Ping struct {

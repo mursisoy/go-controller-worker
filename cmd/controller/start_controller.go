@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"mursisoy/wordcount/internal/clock"
 	"mursisoy/wordcount/internal/controller"
@@ -9,6 +10,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -25,7 +27,19 @@ func main() {
 
 	controllerConfig := controller.ControllerConfig{
 		ListenAddress: listenAddress,
-		LogPriority:   clock.DEBUG,
+		ClockLogConfig: clock.ClockLogConfig{
+			Priority:    clock.DEBUG,
+			FileOutput:  true,
+			LogFilename: fmt.Sprintf("%s-c.log", id),
+		},
+		FailureDetectorConfig: controller.FailureDetectorConfig{
+			HeartBeatTicker: 20 * time.Second,
+			ClockLogConfig: clock.ClockLogConfig{
+				Priority:    clock.DEBUG,
+				FileOutput:  true,
+				LogFilename: fmt.Sprintf("%s-fd.log", id),
+			},
+		},
 	}
 
 	// Notify the sigCh channel for SIGINT (Ctrl+C) and SIGTERM (termination) signals.

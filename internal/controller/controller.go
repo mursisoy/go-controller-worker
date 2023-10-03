@@ -6,12 +6,23 @@ import (
 	"mursisoy/wordcount/internal/clock"
 	"mursisoy/wordcount/internal/common"
 	"net"
+	"sync/atomic"
+	"time"
 )
+
+type jobHandler struct {
+	job            common.Job
+	assignedWorker *workerInfo
+	done           chan struct{}
+	cancel         chan struct{}
+}
 
 // WorkerConfig configures worker. See defaults in GetDefaultConfig.
 type ControllerConfig struct {
-	ListenAddress string
-	LogPriority   clock.LogPriority
+	ListenAddress         string
+	LogPriority           clock.LogPriority
+	ClockLogConfig        clock.ClockLogConfig
+	FailureDetectorConfig FailureDetectorConfig
 }
 
 // Controller represents the central component for failure detection.
@@ -25,11 +36,19 @@ type Controller struct {
 	failedWorker    chan failedWorkerRequest
 	clock           *clock.Clock
 	log             *clock.ClockLogger
+	jobCount        uint32
+	jobRegistry     map[common.JobId]jobHandler
+	jobQueue        chan jobHandler
 }
 
 func init() {
 	gob.Register(common.SignupRequest{})
 	gob.Register(common.SignupResponse{})
+	gob.Register(common.JobSubmitResponse{})
+	gob.Register(common.JobSubmitRequest{})
+	gob.Register(common.TaskSubmitResponse{})
+	gob.Register(common.TaskSubmitRequest{})
+	gob.Register(common.TaskDoneRequest{})
 }
 
 // NewController creates a new instance of the controller.
@@ -38,14 +57,18 @@ func NewController(pid string, config ControllerConfig) *Controller {
 		listenAddress:   config.ListenAddress,
 		shutdown:        make(chan struct{}),
 		done:            make(chan struct{}),
-		failureDetector: newFailureDetector(pid + "-fd"),
-		workerRegistry:  newWorkerRegistry(pid + ""),
+		failureDetector: newFailureDetector(pid+"-fd", config.FailureDetectorConfig),
+		workerRegistry:  newWorkerRegistry(),
 		failedWorker:    make(chan failedWorkerRequest, 5),
+		jobQueue:        make(chan jobHandler, 100),
 		pid:             pid,
 		clock:           clock.NewClock(pid),
-		log:             clock.NewClockLog(pid, pid, clock.ClockLogConfig{Priority: config.LogPriority}),
+		log:             clock.NewClockLog(pid, config.ClockLogConfig),
+		jobRegistry:     make(map[common.JobId]jobHandler),
 	}
 }
+
+const maxJobRetries = 3
 
 func (c *Controller) Start() (net.Addr, error) {
 
@@ -62,12 +85,17 @@ func (c *Controller) Start() (net.Addr, error) {
 	c.log.LogDebugf(c.clock.Tick(), "Controller started failure detector")
 	go c.failureDetector.Start(c.failedWorker)
 
+	c.log.LogDebugf(c.clock.Tick(), "Start job scheduler")
+	go c.scheduleJobs()
+
 	go func() {
 		// Go routine to handle channels
 		for {
 			select {
 			case <-c.shutdown:
 				c.log.LogInfof(c.clock.Tick(), "Shutdown received. Cleaning up....")
+				c.log.LogInfof(c.clock.Tick(), "Close job queue")
+				close(c.jobQueue)
 				listener.Close()
 				<-c.failureDetector.Shutdown()
 				c.log.LogInfof(c.clock.Tick(), "Cleaning done")
@@ -83,8 +111,112 @@ func (c *Controller) Start() (net.Addr, error) {
 		}
 	}()
 
+	c.listenAddress = listener.Addr().String()
 	return listener.Addr(), nil
+}
 
+func (c *Controller) scheduleJobs() {
+	for jobHandler := range c.jobQueue {
+		jobRetries := 0
+	TaskSubmitLoop:
+		for {
+
+			if jobRetries > maxJobRetries {
+				break TaskSubmitLoop
+			} else {
+				jobRetries = jobRetries + 1
+			}
+
+			<-c.workerRegistry.noAvailableWorkers
+			workerInfo, err := c.workerRegistry.getAvailableWorker()
+
+			if err != nil {
+				c.log.LogInfof(c.clock.Tick(), "Error processing job, retrying: %v", err)
+				continue
+			}
+
+			conn, err := net.Dial("tcp", string(workerInfo.address))
+			if err != nil {
+				c.log.LogInfof(c.clock.Tick(), "Error connecting to worker: %v", err)
+				c.failureDetector.unwatchWorker <- workerInfo.id
+				c.workerRegistry.deregisterWorker(workerInfo.id)
+				continue
+			}
+
+			cc := c.clock.Tick()
+			c.log.LogInfof(cc, "New task request to %s (%v)", workerInfo.id, workerInfo.address)
+
+			taskSubmitRequest := common.TaskSubmitRequest{
+				Request: common.RequestWithClock(c.pid, cc),
+				Task: common.Task{
+					JobId:    jobHandler.job.Id,
+					Duration: jobHandler.job.Duration,
+				},
+			}
+			var request interface{} = taskSubmitRequest
+			encoder := gob.NewEncoder(conn)
+			if err = encoder.Encode(&request); err != nil {
+				c.log.LogInfof(c.clock.Tick(), "Task submit error to worker: %v", err)
+				c.workerRegistry.putAvailableWorker(workerInfo.id)
+				continue
+			}
+
+			conn.SetDeadline(time.Now().Add(1 * time.Second))
+			var response interface{}
+			decoder := gob.NewDecoder(conn)
+			if err := decoder.Decode(&response); err != nil {
+				c.log.LogInfof(c.clock.Tick(), "Error decoding message: %v", err)
+				c.workerRegistry.putAvailableWorker(workerInfo.id)
+				continue
+			}
+
+			cc = c.clock.Tick()
+			switch mt := response.(type) {
+			case common.TaskSubmitResponse:
+				cc = c.clock.Merge(mt.Clock)
+				c.log.LogInfof(cc, "Task submit success from %v (%v)", workerInfo.id, conn.RemoteAddr().String())
+				jobHandler.assignedWorker = &workerInfo
+				jobHandler.cancel = make(chan struct{})
+				jobHandler.done = make(chan struct{})
+				c.jobRegistry[jobHandler.job.Id] = jobHandler
+				go c.taskWatchdog(&jobHandler)
+				break TaskSubmitLoop
+			default:
+				c.log.LogInfof(cc, "Task submit error, received message type %v from %v(%v): %v", mt, workerInfo.id, conn.RemoteAddr().String(), response)
+				c.workerRegistry.putAvailableWorker(workerInfo.id)
+				continue
+			}
+		}
+
+	}
+}
+
+func (c *Controller) taskWatchdog(jobHandler *jobHandler) {
+	ticker := time.NewTicker(jobHandler.job.Duration + 2*time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			c.log.LogInfof(c.clock.Tick(), "JobId %v execution timeout", jobHandler.job.Id)
+			jobHandler.assignedWorker = nil
+			jobHandler.cancel = nil
+			jobHandler.done = nil
+			c.jobQueue <- *jobHandler
+			return
+		case <-jobHandler.done:
+			c.log.LogInfof(c.clock.Tick(), "JobId %v done", jobHandler.job.Id)
+			c.workerRegistry.putAvailableWorker(jobHandler.assignedWorker.id)
+			jobHandler.assignedWorker = nil
+			jobHandler.cancel = nil
+			jobHandler.done = nil
+			return
+		case <-jobHandler.cancel:
+			c.log.LogInfof(c.clock.Tick(), "JobId %v canceled", jobHandler.job.Id)
+			jobHandler.assignedWorker = nil
+			jobHandler.cancel = nil
+			jobHandler.done = nil
+			return
+		}
+	}
 }
 
 func (c *Controller) handleConnections(listener net.Listener) {
@@ -129,6 +261,8 @@ func (c *Controller) HandleClient(conn net.Conn) {
 		c.handleSignupRequest(data.(common.SignupRequest), conn)
 	case common.JobSubmitRequest:
 		c.handleJobSubmitRequest(data.(common.JobSubmitRequest), conn)
+	case common.TaskDoneRequest:
+		c.handleTaskDoneRequest(data.(common.TaskDoneRequest), conn)
 	default:
 		c.log.LogErrorf(c.clock.Tick(), "%v message type received but not handled", mt)
 	}
@@ -137,7 +271,9 @@ func (c *Controller) HandleClient(conn net.Conn) {
 // Handles signup requests from client
 func (c *Controller) handleSignupRequest(signupRequest common.SignupRequest, conn net.Conn) {
 
-	c.log.LogInfof(c.clock.Tick(), "New signup request from %v", signupRequest.Id)
+	c.clock.Tick()
+	cc := c.clock.Merge(signupRequest.Clock)
+	c.log.LogInfof(cc, "New signup request from %v", signupRequest.Pid)
 
 	workerInfo := workerInfo{
 		id:      workerId(signupRequest.Id),
@@ -157,7 +293,7 @@ func (c *Controller) handleSignupRequest(signupRequest common.SignupRequest, con
 		c.log.LogDebugf(c.clock.Tick(), "Signup error to server: %v", err)
 	}
 
-	cc := c.clock.Tick()
+	cc = c.clock.Tick()
 	c.log.LogInfof(cc, "Start failure detector request %s", signupRequest.Id)
 
 	// monitorWorkerRequest := common.MonitorWorkerRequest{Address: signupRequest.Address}
@@ -168,6 +304,53 @@ func (c *Controller) handleSignupRequest(signupRequest common.SignupRequest, con
 		workerInfo: workerInfo}
 }
 
+// Handles signup requests from client
+func (c *Controller) handleTaskDoneRequest(taskDoneRequest common.TaskDoneRequest, conn net.Conn) {
+
+	c.clock.Tick()
+	cc := c.clock.Merge(taskDoneRequest.Clock)
+	c.log.LogInfof(cc, "Received task done from %v", taskDoneRequest.Pid)
+	if c.jobRegistry[taskDoneRequest.Task.JobId].assignedWorker.id == workerId(taskDoneRequest.Pid) {
+		close(c.jobRegistry[taskDoneRequest.Task.JobId].done)
+	} else {
+		c.log.LogInfof(c.clock.Tick(), "The received task was not assigned to %v", taskDoneRequest.Pid)
+		c.workerRegistry.putAvailableWorker(workerId(taskDoneRequest.Pid))
+	}
+
+}
+
 func (c *Controller) handleJobSubmitRequest(jobSubmitRequest common.JobSubmitRequest, conn net.Conn) {
+	c.clock.Tick()
+	cc := c.clock.Merge(jobSubmitRequest.Clock)
+	c.log.LogInfof(cc, "New job request from %v", jobSubmitRequest.Pid)
+	jobId := atomic.AddUint32(&c.jobCount, 1)
+	jobSubmitRequest.Job.Id = common.JobId(jobId)
+
+	jobHandle := jobHandler{
+		job: jobSubmitRequest.Job,
+	}
+
+	var success bool
+	select {
+	case c.jobQueue <- jobHandle:
+		c.log.LogDebugf(c.clock.Tick(), "Job %v enqueued", jobHandle.job.Id)
+		success = true
+	default:
+		c.log.LogDebugf(c.clock.Tick(), "Job %v not queued. Full queue.", jobHandle.job.Id)
+		success = false
+		break
+	}
+
+	cc = c.clock.Tick()
+	jobSubmitResponse := common.JobSubmitResponse{
+		Response: common.ResponseWithClock(c.pid, cc, success),
+		Job:      jobSubmitRequest.Job,
+	}
+	c.log.LogDebugf(cc, "Send job response with id  %v.", jobHandle.job.Id)
+	encoder := gob.NewEncoder(conn)
+	var response interface{} = jobSubmitResponse
+	if err := encoder.Encode(&response); err != nil {
+		c.log.LogDebugf(c.clock.Tick(), "Failed response to client: %v", err)
+	}
 
 }

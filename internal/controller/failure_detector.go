@@ -18,16 +18,23 @@ type failedWorkerRequest struct {
 	workerId workerId
 }
 
+// WorkerConfig configures worker. See defaults in GetDefaultConfig.
+type FailureDetectorConfig struct {
+	HeartBeatTicker time.Duration
+	ClockLogConfig  clock.ClockLogConfig
+}
+
 type failureDetector struct {
-	pid            string
-	done           chan struct{}
-	shutdown       chan struct{}
-	watchWorker    chan watchWorkerRequest
-	unwatchWorker  chan workerId
-	failedWorker   chan<- failedWorkerRequest
-	watchedWorkers map[workerId]chan struct{}
-	clock          *clock.Clock
-	log            *clock.ClockLogger
+	pid             string
+	done            chan struct{}
+	shutdown        chan struct{}
+	watchWorker     chan watchWorkerRequest
+	unwatchWorker   chan workerId
+	failedWorker    chan<- failedWorkerRequest
+	watchedWorkers  map[workerId]chan struct{}
+	clock           *clock.Clock
+	log             *clock.ClockLogger
+	heartBeatTicker time.Duration
 }
 
 func init() {
@@ -35,16 +42,17 @@ func init() {
 	gob.Register(common.Pong{})
 }
 
-func newFailureDetector(pid string) *failureDetector {
+func newFailureDetector(pid string, config FailureDetectorConfig) *failureDetector {
 	return &failureDetector{
-		pid:            pid,
-		done:           make(chan struct{}),
-		shutdown:       make(chan struct{}),
-		watchWorker:    make(chan watchWorkerRequest, 1),
-		unwatchWorker:  make(chan workerId, 1),
-		watchedWorkers: make(map[workerId]chan struct{}),
-		clock:          clock.NewClock(pid),
-		log:            clock.NewClockLog(pid, pid, clock.ClockLogConfig{}),
+		pid:             pid,
+		done:            make(chan struct{}),
+		shutdown:        make(chan struct{}),
+		watchWorker:     make(chan watchWorkerRequest, 1),
+		unwatchWorker:   make(chan workerId, 1),
+		watchedWorkers:  make(map[workerId]chan struct{}),
+		clock:           clock.NewClock(pid),
+		log:             clock.NewClockLog(pid, config.ClockLogConfig),
+		heartBeatTicker: config.HeartBeatTicker,
 	}
 }
 
@@ -97,7 +105,7 @@ func (fd *failureDetector) Start(failedWorker chan<- failedWorkerRequest) {
 }
 
 func (fd *failureDetector) monitorWorker(workerInfo workerInfo, done chan struct{}) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(fd.heartBeatTicker)
 	for {
 		select {
 		case <-done:
