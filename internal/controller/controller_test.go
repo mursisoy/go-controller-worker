@@ -133,8 +133,7 @@ func TestCorrectJobSubmission(t *testing.T) {
 		t.Fatalf("Error connecting to worker: %v", err)
 	}
 
-	cc := testClock.Tick()
-	testClockLog.LogDebugf(cc, "Send job to controller ")
+	cc := testClockLog.LogDebugf("Send job to controller ")
 	jobSubmitRequest := common.JobSubmitRequest{
 		Request: common.RequestWithClock(pid, cc),
 		Job: common.Job{
@@ -158,9 +157,8 @@ func TestCorrectJobSubmission(t *testing.T) {
 	testClock.Tick()
 	switch mt := response.(type) {
 	case common.JobSubmitResponse:
-		cc = testClock.Merge(mt.Clock)
 		if mt.Response.Success {
-			testClockLog.LogInfof(cc, "Received success job response with job id %v", mt.Job.Id)
+			testClockLog.LogMergeInfof(mt.Clock, "Received success job response with job id %v", mt.Job.Id)
 		} else {
 			t.Fatalf("Received unsucessful response from controller")
 		}
@@ -210,8 +208,7 @@ func TestRetryOnWorkerFailedJobSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error connecting to worker: %v", err)
 	}
-	cc := testClock.Tick()
-	testClockLog.LogDebugf(cc, "Send job to controller ")
+	cc := testClockLog.LogDebugf("Send job to controller ")
 	jobSubmitRequest := common.JobSubmitRequest{
 		Request: common.RequestWithClock(pid, cc),
 		Job: common.Job{
@@ -235,9 +232,8 @@ func TestRetryOnWorkerFailedJobSubmission(t *testing.T) {
 	testClock.Tick()
 	switch mt := response.(type) {
 	case common.JobSubmitResponse:
-		cc = testClock.Merge(mt.Clock)
 		if mt.Response.Success {
-			testClockLog.LogInfof(cc, "Received success job response with job id %v", mt.Job.Id)
+			testClockLog.LogMergeInfof(mt.Clock, "Received success job response with job id %v", mt.Job.Id)
 		} else {
 			t.Fatalf("Received unsucessful response from controller")
 		}

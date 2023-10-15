@@ -8,7 +8,6 @@ import (
 	"mursisoy/wordcount/internal/common"
 	"net"
 	"sync"
-	"time"
 )
 
 type taskHandler struct {
@@ -25,8 +24,7 @@ type Worker struct {
 	controllerAddress string
 	listenAddress     string
 	pid               string
-	clock             *clock.Clock
-	log               *clock.ClockLogger
+	clog              *clock.ClockLogger
 	runningTask       *taskHandler
 	taskMutex         sync.Mutex
 	// pendingJobs      []job
@@ -68,8 +66,7 @@ func NewWorker(pid string, config WorkerConfig) *Worker {
 		controllerAddress: config.ControllerAddress,
 		listenAddress:     config.ListenAddress,
 		pid:               pid,
-		clock:             clock.NewClock(pid),
-		log:               clock.NewClockLog(pid, config.ClockLogConfig),
+		clog:              clock.NewClockLog(pid, config.ClockLogConfig),
 		runningTask:       nil,
 	}
 }
@@ -83,7 +80,7 @@ func (w *Worker) shutdown() {
 	if w.runningTask != nil {
 		close(w.runningTask.cancel)
 	}
-	w.log.LogInfof(w.clock.Tick(), "worker %s shutdown", w.pid)
+	w.clog.LogInfof("worker %s shutdown", w.pid)
 	close(w.done)
 }
 
@@ -97,7 +94,7 @@ func (w *Worker) Start(ctx context.Context) (net.Addr, error) {
 	w.listenAddress = listener.Addr().String()
 
 	// Main loop to handle connections
-	w.log.LogInfof(w.clock.Tick(), "worker listener started: %v", listener.Addr().String())
+	w.clog.LogInfof("worker listener started: %v", listener.Addr().String())
 	go w.handleConnections(listener)
 
 	// Go routine to handle shutdowns
@@ -108,7 +105,7 @@ func (w *Worker) Start(ctx context.Context) (net.Addr, error) {
 	}()
 
 	if err := w.signup(); err != nil {
-		w.log.LogErrorf(w.clock.Tick(), "signup failed: %v. Exiting", err)
+		w.clog.LogErrorf("signup failed: %v. Exiting", err)
 		return nil, fmt.Errorf("signup failed: %v. Exiting", err)
 	}
 	return listener.Addr(), nil
@@ -122,10 +119,10 @@ func (w *Worker) handleConnections(listener net.Listener) {
 		if err != nil {
 			// Check if the error is due to listener closure
 			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
-				w.log.LogErrorf(w.clock.Tick(), "closed network connection: %v", err)
+				w.clog.LogErrorf("closed network connection: %v", err)
 				return
 			}
-			w.log.LogErrorf(w.clock.Tick(), "error accepting connection: %v", err)
+			w.clog.LogErrorf("error accepting connection: %v", err)
 			return
 		}
 		go w.HandleClient(conn)
@@ -143,8 +140,7 @@ func (w *Worker) signup() error {
 	defer conn.Close()
 
 	// Signup request start
-	cc := w.clock.Tick()
-	w.log.LogInfof(cc, "Send signup request to controller")
+	cc := w.clog.LogInfof("Send signup request to controller")
 	signupRequest := common.SignupRequest{
 		Request: common.RequestWithClock(w.pid, cc),
 		Id:      w.pid,
@@ -165,9 +161,8 @@ func (w *Worker) signup() error {
 	switch mt := response.(type) {
 	case common.SignupResponse:
 		signupResponse := response.(common.SignupResponse)
-		w.clock.Merge(signupResponse.Clock)
 		if signupResponse.Success {
-			w.log.LogInfof(w.clock.Tick(), "signup on controller success")
+			w.clog.LogMergeInfof(signupResponse.Clock, "signup on controller success")
 			return nil
 		} else {
 			return fmt.Errorf("signup error: %v", signupResponse.Message)
@@ -188,7 +183,7 @@ func (w *Worker) HandleClient(conn net.Conn) {
 	var data interface{}
 	decoder := gob.NewDecoder(conn)
 	if err := decoder.Decode(&data); err != nil {
-		w.log.LogErrorf(w.clock.Tick(), "error decoding message: %v", err)
+		w.clog.LogErrorf("error decoding message: %v", err)
 		return
 	}
 
@@ -199,123 +194,20 @@ func (w *Worker) HandleClient(conn net.Conn) {
 	case common.TaskSubmitRequest:
 		w.handleTask(data.(common.TaskSubmitRequest), conn)
 	default:
-		w.log.LogErrorf(w.clock.Tick(), "%v message type received but not handled", mt)
+		w.clog.LogErrorf("%v message type received but not handled", mt)
 	}
-}
-
-func (w *Worker) handleTask(taskRequest common.TaskSubmitRequest, conn net.Conn) {
-	w.clock.Tick()
-	cc := w.clock.Merge(taskRequest.Clock)
-	w.log.LogInfof(cc, "new task request from %s (%v)", taskRequest.Pid, conn.RemoteAddr())
-	cc = w.clock.Tick()
-	w.log.LogInfof(cc, "Send task submit response to %s (%v)", taskRequest.Pid, conn.RemoteAddr())
-	var taskSubmitResponse = common.TaskSubmitResponse{
-		Response: common.ResponseWithClock(w.pid, cc, false),
-	}
-
-	if err := w.runTask(taskRequest.Task); err == nil {
-		taskSubmitResponse.Success = true
-	}
-
-	encoder := gob.NewEncoder(conn)
-	var response interface{} = taskSubmitResponse
-	if err := encoder.Encode(&response); err != nil {
-		w.log.LogErrorf(w.clock.Tick(), "task submit response error to server: %v", err)
-	}
-}
-
-func (w *Worker) runTask(task common.Task) error {
-	defer w.taskMutex.Unlock()
-	w.taskMutex.Lock()
-
-	if w.runningTask != nil {
-		return fmt.Errorf("Worker already working on job %v", w.runningTask.task.JobId)
-	}
-
-	cancel := make(chan struct{})
-
-	w.runningTask = &taskHandler{
-		task:   task,
-		cancel: cancel,
-	}
-	go func(cancel chan struct{}) {
-		var taskTicker, failTicker, crashTicker *time.Ticker
-		taskTicker = time.NewTicker(task.Duration)
-		if task.WillFail > 0 {
-			failTicker = time.NewTicker(task.WillFail)
-		} else {
-			failTicker = time.NewTicker(1 * time.Second)
-			failTicker.Stop()
-		}
-		if task.WillCrash > 0 {
-			crashTicker = time.NewTicker(task.WillCrash)
-		} else {
-			crashTicker = time.NewTicker(1 * time.Second)
-			crashTicker.Stop()
-		}
-	RunningTaskLoop:
-		for {
-			select {
-			case <-cancel:
-				w.log.LogInfof(w.clock.Tick(), "Task  %v canceled", task.JobId)
-				break RunningTaskLoop
-			case c := <-failTicker.C:
-				w.log.LogInfof(w.clock.Tick(), "Task failed at: %v", c)
-				break RunningTaskLoop
-			case c := <-crashTicker.C:
-				w.log.LogInfof(w.clock.Tick(), "Task failed at: %v", c)
-				break RunningTaskLoop
-			case c := <-taskTicker.C:
-				task.Result = c
-				w.log.LogInfof(w.clock.Tick(), "Task done, result: %v", c)
-
-				conn, err := net.Dial("tcp", string(w.controllerAddress))
-				if err != nil {
-					w.log.LogErrorf(w.clock.Tick(), "Fail to send done task to controller (%v)", w.controllerAddress)
-					break
-				}
-
-				cc := w.clock.Tick()
-				w.log.LogInfof(cc, "Send done task to controller (%v)", w.controllerAddress)
-				var taskDoneRequest = common.TaskDoneRequest{
-					Request: common.RequestWithClock(w.pid, cc),
-					Task:    task,
-				}
-				encoder := gob.NewEncoder(conn)
-				var response interface{} = taskDoneRequest
-				if err := encoder.Encode(&response); err != nil {
-					w.log.LogErrorf(w.clock.Tick(), "Sen donde task error to controller: %v", err)
-				}
-				break RunningTaskLoop
-			}
-		}
-		w.runningTask = nil
-		if taskTicker != nil {
-			taskTicker.Stop()
-		}
-		if failTicker != nil {
-			failTicker.Stop()
-		}
-		if crashTicker != nil {
-			crashTicker.Stop()
-		}
-	}(cancel)
-	return nil
 }
 
 func (w *Worker) handleHeartbeat(pingRequest common.Ping, conn net.Conn) {
-	w.clock.Tick()
-	cc := w.clock.Merge(pingRequest.Clock)
-	w.log.LogInfof(cc, "new ping request from %s (%v)", pingRequest.Pid, conn.RemoteAddr())
+	w.clog.LogMergeInfof(pingRequest.Clock, "new ping request from %s (%v)", pingRequest.Pid, conn.RemoteAddr())
 
-	cc = w.clock.Tick()
-	w.log.LogInfof(cc, "send pong to %s (%v)", pingRequest.Pid, conn.RemoteAddr())
+	cc := w.clog.LogInfof("send pong to %s (%v)", pingRequest.Pid, conn.RemoteAddr())
 	var pongResponse = common.Pong{
 		ClockPayload: clock.ClockPayload{Clock: cc, Pid: w.pid},
 	}
 	encoder := gob.NewEncoder(conn)
 	var response interface{} = pongResponse
 	if err := encoder.Encode(&response); err != nil {
-		w.log.LogErrorf(w.clock.Tick(), "pong error to server: %v", err)
+		w.clog.LogErrorf("pong error to server: %v", err)
 	}
 }

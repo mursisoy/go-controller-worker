@@ -58,6 +58,8 @@ type ClockLogger struct {
 	logger *log.Logger
 
 	fileOutput bool
+
+	clock *Clock
 }
 
 // InitGoVector returns a Log which generates a logs prefixed with
@@ -69,6 +71,7 @@ func NewClockLog(pid string, config ClockLogConfig) *ClockLogger {
 	clockLog.pid = pid
 	clockLog.priority = config.Priority
 	clockLog.fileOutput = config.FileOutput
+	clockLog.clock = NewClock(pid)
 
 	//Starting File IO . If Log exists, Log Will be deleted and A New one will be created
 	var mw io.Writer
@@ -98,22 +101,54 @@ func (cl *ClockLogger) Close() {
 }
 
 // Logs a DEBUG message along with a processID and a vector clock
-func (cl *ClockLogger) LogDebugf(clock ClockMap, format string, v ...any) {
-	cl.Logf(LogPriority(DEBUG), clock, format, v...)
+func (cl *ClockLogger) LogMergeDebugf(clock ClockMap, format string, v ...any) ClockMap {
+	return cl.LogMergef(LogPriority(DEBUG), clock, format, v...)
 }
 
 // Logs an INFO message along with a processID and a vector clock
-func (cl *ClockLogger) LogInfof(clock ClockMap, format string, v ...any) {
-	cl.Logf(LogPriority(INFO), clock, format, v...)
+func (cl *ClockLogger) LogMergeInfof(clock ClockMap, format string, v ...any) ClockMap {
+	return cl.LogMergef(LogPriority(INFO), clock, format, v...)
 }
 
 // Logs an ERROR message along with a processID and a vector clock
-func (cl *ClockLogger) LogErrorf(clock ClockMap, format string, v ...any) {
-	cl.Logf(LogPriority(ERROR), clock, format, v...)
+func (cl *ClockLogger) LogMergeErrorf(clock ClockMap, format string, v ...any) ClockMap {
+	return cl.LogMergef(LogPriority(ERROR), clock, format, v...)
 }
 
-func (cl *ClockLogger) Logf(level LogPriority, clock ClockMap, format string, v ...any) {
+// Logs a DEBUG message along with a processID and a vector clock
+func (cl *ClockLogger) LogDebugf(format string, v ...any) ClockMap {
+	return cl.Logf(LogPriority(DEBUG), format, v...)
+}
+
+// Logs an INFO message along with a processID and a vector clock
+func (cl *ClockLogger) LogInfof(format string, v ...any) ClockMap {
+	return cl.Logf(LogPriority(INFO), format, v...)
+}
+
+// Logs an ERROR message along with a processID and a vector clock
+func (cl *ClockLogger) LogErrorf(format string, v ...any) ClockMap {
+	return cl.Logf(LogPriority(ERROR), format, v...)
+}
+
+// Ticks and merge de clock
+func (cl *ClockLogger) LogMergef(level LogPriority, clock ClockMap, format string, v ...any) ClockMap {
+	var clockMap ClockMap
 	if level >= cl.priority {
-		cl.logger.Output(3, fmt.Sprintf("[%s] - %s\n%s %s", prefixLookup[cl.priority], fmt.Sprintf(format, v...), cl.pid, clock))
+		clockMap = cl.clock.TickAndMerge(clock)
+		cl.logger.Output(3, fmt.Sprintf("[%s] - %s\n%s %s", prefixLookup[cl.priority], fmt.Sprintf(format, v...), cl.pid, clockMap))
+	} else {
+		clockMap = cl.clock.GetClock()
 	}
+	return clockMap
+}
+
+func (cl *ClockLogger) Logf(level LogPriority, format string, v ...any) ClockMap {
+	var clockMap ClockMap
+	if level >= cl.priority {
+		clockMap = cl.clock.Tick()
+		cl.logger.Output(3, fmt.Sprintf("[%s] - %s\n%s %s", prefixLookup[cl.priority], fmt.Sprintf(format, v...), cl.pid, clockMap))
+	} else {
+		clockMap = cl.clock.GetClock()
+	}
+	return clockMap
 }

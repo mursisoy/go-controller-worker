@@ -83,6 +83,18 @@ func (vc *Clock) Merge(other ClockMap) ClockMap {
 	return vc.copyClock()
 }
 
+func (vc *Clock) TickAndMerge(other ClockMap) ClockMap {
+	defer vc.mutex.Unlock()
+	vc.mutex.Lock()
+	vc.clock[vc.pid] = vc.clock[vc.pid] + 1
+	for id := range other {
+		if vc.clock[id] < other[id] {
+			vc.clock[id] = other[id]
+		}
+	}
+	return vc.copyClock()
+}
+
 func (vc *Clock) String() string {
 	return vc.GetClock().String()
 }
