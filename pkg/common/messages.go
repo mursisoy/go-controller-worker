@@ -1,6 +1,6 @@
 package common
 
-import "mursisoy/wordcount/internal/clock"
+import "github.com/mursisoy/go-controller-worker/pkg/clock"
 
 type Request struct {
 	clock.ClockPayload

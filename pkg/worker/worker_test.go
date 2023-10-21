@@ -1,10 +1,11 @@
 package worker
 
 import (
-	"mursisoy/wordcount/internal/clock"
-	"mursisoy/wordcount/internal/controller"
 	"testing"
 	"time"
+
+	"github.com/mursisoy/go-controller-worker/pkg/clock"
+	"github.com/mursisoy/go-controller-worker/pkg/controller"
 )
 
 func TestSignup(t *testing.T) {

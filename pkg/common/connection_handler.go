@@ -7,7 +7,7 @@ import (
 
 type ConnectionHandlerCallback func(net.Conn)
 
-func HandleConnections(listener net.Listener, handler connectionHandlerCallback) {
+func HandleConnections(listener net.Listener, handler ConnectionHandlerCallback) {
 	// Main loop to handle connections
 	for {
 		conn, err := listener.Accept()

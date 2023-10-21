@@ -4,13 +4,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"mursisoy/wordcount/internal/clock"
-	"mursisoy/wordcount/internal/controller"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/mursisoy/go-controller-worker/pkg/clock"
+	"github.com/mursisoy/go-controller-worker/pkg/controller"
 )
 
 func main() {

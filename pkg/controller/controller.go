@@ -3,11 +3,12 @@ package controller
 import (
 	"encoding/gob"
 	"fmt"
-	"mursisoy/wordcount/internal/clock"
-	"mursisoy/wordcount/internal/common"
 	"net"
 	"sync/atomic"
 	"time"
+
+	"github.com/mursisoy/go-controller-worker/pkg/clock"
+	"github.com/mursisoy/go-controller-worker/pkg/common"
 )
 
 type jobHandler struct {

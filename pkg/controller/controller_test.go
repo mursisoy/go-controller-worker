@@ -4,12 +4,13 @@ package controller
 import (
 	"context"
 	"encoding/gob"
-	"mursisoy/wordcount/internal/clock"
-	"mursisoy/wordcount/internal/common"
-	"mursisoy/wordcount/internal/worker"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/mursisoy/go-controller-worker/pkg/clock"
+	"github.com/mursisoy/go-controller-worker/pkg/common"
+	"github.com/mursisoy/go-controller-worker/pkg/worker"
 )
 
 // Be sure to update your imports

@@ -3,10 +3,11 @@ package worker
 import (
 	"context"
 	"fmt"
-	"mursisoy/wordcount/internal/clock"
-	"mursisoy/wordcount/internal/common"
 	"net"
 	"sync"
+
+	"github.com/mursisoy/go-controller-worker/pkg/clock"
+	"github.com/mursisoy/go-controller-worker/pkg/common"
 )
 
 type taskHandler struct {

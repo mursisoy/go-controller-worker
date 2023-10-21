@@ -2,10 +2,11 @@ package controller
 
 import (
 	"encoding/gob"
-	"mursisoy/wordcount/internal/clock"
-	"mursisoy/wordcount/internal/common"
 	"net"
 	"time"
+
+	"github.com/mursisoy/go-controller-worker/pkg/clock"
+	"github.com/mursisoy/go-controller-worker/pkg/common"
 )
 
 type watchWorkerRequest struct {

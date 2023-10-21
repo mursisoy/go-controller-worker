@@ -5,11 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"mursisoy/wordcount/internal/clock"
-	"mursisoy/wordcount/internal/worker"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/mursisoy/go-controller-worker/pkg/clock"
+	"github.com/mursisoy/go-controller-worker/pkg/worker"
 )
 
 func main() {

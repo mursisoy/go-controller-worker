@@ -3,9 +3,10 @@ package worker
 import (
 	"encoding/gob"
 	"fmt"
-	"mursisoy/wordcount/internal/common"
 	"net"
 	"time"
+
+	"github.com/mursisoy/go-controller-worker/pkg/common"
 )
 
 func init() {
