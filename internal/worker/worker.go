@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/gob"
 	"fmt"
 	"mursisoy/wordcount/internal/clock"
 	"mursisoy/wordcount/internal/common"
@@ -49,15 +48,11 @@ type WorkerConfig struct {
 // 	port int
 // }
 
-func init() {
-	gob.Register(common.SignupRequest{})
-	gob.Register(common.SignupResponse{})
-	gob.Register(common.Ping{})
-	gob.Register(common.Pong{})
-	gob.Register(common.TaskSubmitResponse{})
-	gob.Register(common.TaskSubmitRequest{})
-	gob.Register(common.TaskDoneRequest{})
-}
+type messageHandlerCallback func(message interface{}, conn net.Conn)
+
+// var handleMessageType := {
+// 	common.Ping:
+// }
 
 // NewWorker creates a new instance of the worker.
 func NewWorker(pid string, config WorkerConfig) *Worker {
@@ -95,7 +90,11 @@ func (w *Worker) Start(ctx context.Context) (net.Addr, error) {
 
 	// Main loop to handle connections
 	w.clog.LogInfof("worker listener started: %v", listener.Addr().String())
-	go w.handleConnections(listener)
+	go func() {
+		w.wg.Add(1)
+		defer w.wg.Done()
+		common.HandleConnections(listener, w.handleClient)
+	}()
 
 	// Go routine to handle shutdowns
 	go func() {
@@ -111,79 +110,16 @@ func (w *Worker) Start(ctx context.Context) (net.Addr, error) {
 	return listener.Addr(), nil
 }
 
-func (w *Worker) handleConnections(listener net.Listener) {
-	defer w.wg.Done()
-	w.wg.Add(1)
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			// Check if the error is due to listener closure
-			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
-				w.clog.LogErrorf("closed network connection: %v", err)
-				return
-			}
-			w.clog.LogErrorf("error accepting connection: %v", err)
-			return
-		}
-		go w.HandleClient(conn)
-	}
-}
-
-func (w *Worker) signup() error {
-
-	// Connect to the server
-	conn, err := net.Dial("tcp", w.controllerAddress)
-	// conn.SetDeadline(time.Now().Add(1 * time.Second))
-	if err != nil {
-		return fmt.Errorf("error connecting to server: %v", err)
-	}
-	defer conn.Close()
-
-	// Signup request start
-	cc := w.clog.LogInfof("Send signup request to controller")
-	signupRequest := common.SignupRequest{
-		Request: common.RequestWithClock(w.pid, cc),
-		Id:      w.pid,
-		Address: w.listenAddress,
-	}
-	var request interface{} = signupRequest
-	encoder := gob.NewEncoder(conn)
-	if err = encoder.Encode(&request); err != nil {
-		return fmt.Errorf("signup error to server: %v", err)
-	}
-
-	// Signup response start
-	var response interface{}
-	decoder := gob.NewDecoder(conn)
-	if err := decoder.Decode(&response); err != nil {
-		return fmt.Errorf("error decoding message: %v", err)
-	}
-	switch mt := response.(type) {
-	case common.SignupResponse:
-		signupResponse := response.(common.SignupResponse)
-		if signupResponse.Success {
-			w.clog.LogMergeInfof(signupResponse.Clock, "signup on controller success")
-			return nil
-		} else {
-			return fmt.Errorf("signup error: %v", signupResponse.Message)
-		}
-	default:
-		return fmt.Errorf("signup error, received message type %v: %v", mt, response)
-	}
-
-}
-
-// HandleClient handles incoming client connections for the worker.
-func (w *Worker) HandleClient(conn net.Conn) {
+// HandleClient handles incoming client connections for the controller.
+func (w *Worker) handleClient(conn net.Conn) {
 	w.wg.Add(1)
 	defer w.wg.Done()
 	defer conn.Close()
 
 	// Decode the message received or fail
-	var data interface{}
-	decoder := gob.NewDecoder(conn)
-	if err := decoder.Decode(&data); err != nil {
-		w.clog.LogErrorf("error decoding message: %v", err)
+	data, err := common.DecodeMessage(conn)
+	if err != nil {
+		w.clog.LogErrorf("Error decoding message: %v", err)
 		return
 	}
 
@@ -195,19 +131,5 @@ func (w *Worker) HandleClient(conn net.Conn) {
 		w.handleTask(data.(common.TaskSubmitRequest), conn)
 	default:
 		w.clog.LogErrorf("%v message type received but not handled", mt)
-	}
-}
-
-func (w *Worker) handleHeartbeat(pingRequest common.Ping, conn net.Conn) {
-	w.clog.LogMergeInfof(pingRequest.Clock, "new ping request from %s (%v)", pingRequest.Pid, conn.RemoteAddr())
-
-	cc := w.clog.LogInfof("send pong to %s (%v)", pingRequest.Pid, conn.RemoteAddr())
-	var pongResponse = common.Pong{
-		ClockPayload: clock.ClockPayload{Clock: cc, Pid: w.pid},
-	}
-	encoder := gob.NewEncoder(conn)
-	var response interface{} = pongResponse
-	if err := encoder.Encode(&response); err != nil {
-		w.clog.LogErrorf("pong error to server: %v", err)
 	}
 }

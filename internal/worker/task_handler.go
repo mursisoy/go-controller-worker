@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+func init() {
+	gob.Register(common.TaskSubmitResponse{})
+	gob.Register(common.TaskSubmitRequest{})
+	gob.Register(common.TaskDoneRequest{})
+}
+
 func (w *Worker) handleTask(taskRequest common.TaskSubmitRequest, conn net.Conn) {
 
 	w.clog.LogMergeInfof(taskRequest.Clock, "new task request from %s (%v)", taskRequest.Pid, conn.RemoteAddr())
